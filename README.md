@@ -1,6 +1,6 @@
-# Polymarket Trading Bot
+# Rust Polymarket Trading Bot
 
-A Rust trading bot for [Polymarket](https://polymarket.com) that trades 15-minute (and 5-minute) price prediction markets using limit orders and trailing strategies.
+A Rust trading bot for [Polymarket](https://polymarket.com) that trades 15-minute price prediction markets using limit orders and trailing strategies.
 
 **Features:**
 - **Dual Limit Same-Size (0.45)** — Place Up/Down limit buys at $0.45 at market start; hedge with market buy if only one fills (2-min / 4-min / early / standard).
