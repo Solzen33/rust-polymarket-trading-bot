@@ -1,231 +1,149 @@
-markdown
+# Polymarket Trading Bot
 
-# 🚀 Pump.Fun Comment Bot – Solana Auto Shill & Engagement Tool
+A Rust trading bot for [Polymarket](https://polymarket.com) that trades 15-minute (and 5-minute) price prediction markets using limit orders and trailing strategies.
 
-[![Solana](https://img.shields.io/badge/Solana-Devnet/Mainnet-9945FF?style=flat&logo=solana)](https://solana.com)
-[![Node.js](https://img.shields.io/badge/Node.js-20+-brightgreen)](https://nodejs.org)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-![GitHub stars](https://img.shields.io/github/stars/Solzen33/pumpfun-comment-bot?style=social)
-![GitHub forks](https://img.shields.io/github/forks/Solzen33/pumpfun-comment-bot?style=social)
+**Features:**
+- **Dual Limit Same-Size (0.45)** — Place Up/Down limit buys at $0.45 at market start; hedge with market buy if only one fills (2-min / 4-min / early / standard).
+- **Dual Limit 5-Minute BTC** — Same idea for BTC 5-minute markets with time-based bands and trailing stop.
+- **Trailing Bot** — Wait for price &lt; 0.45, then trail with stop loss and trailing stop on the opposite side.
+- **Backtest** — Replay strategy on historical price data in `history/`.
+- **Test binaries** — Limit order, redeem, merge, allowance, sell, and prediction tests.
 
-**Pump.fun comment bot** — an open-source automated tool for **Solana Pump.fun** that posts hype comments, builds threads, and shills tokens to boost visibility and engagement. Supports **Thread mode** (conversation building), **Shill mode** (spam on new/trending tokens), fresh wallet rotation, image uploads, and captcha solving.
+---
 
-Perfect for memecoin creators wanting to generate activity, create FOMO, or simulate community vibes on pump.fun launches.
+## Quick reference
 
-**⚠️ WARNING**  
-This tool involves automated engagement which may violate Pump.fun's terms → risk of shadow-bans, account restrictions, or token penalties.  
-Use at your own risk. For **educational & testing purposes** only. Not financial advice. Never use real funds without understanding risks.
+| Binary | Description |
+|--------|-------------|
+| `main_dual_limit_045_same_size` | Dual limit 0.45, same-size hedge (default) |
+| `main_dual_limit_045_5m_btc` | Dual limit 0.45, BTC 5-minute only |
+| `main_trailing` | Trailing stop bot |
+| `backtest` | Backtest on history files |
+| `test_*` | test_limit_order, test_redeem, test_merge, test_allowance, test_sell, test_predict_fun |
 
+---
 
+## Setup
 
-## 📱 Social Media
+1. **Install Rust** (if needed):
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
 
-### Stay Connected
-| Platform | Link | Purpose |
-|----------|------|---------|
-| Telegram | [t.me/solzen33](https://t.me/solzen77) | Announcements & Support |
-| X | [x.com/solzen33](https://x.com/solzen77) | News & Updates |
+2. **Build:**
+   ```bash
+   cargo build --release
+   ```
+   Release builds use LTO and single codegen-unit for better performance. TLS uses **rustls** (no system OpenSSL required).
 
-## 📹 Sample Videos
+3. **Configure:** Copy `config.example.json` to `config.json` and set:
+   - `polymarket`: `api_key`, `api_secret`, `api_passphrase`, `private_key`
+   - Optional: `proxy_wallet_address`, `signature_type` (1 = POLY_PROXY, 2 = GNOSIS_SAFE)
+   - `trading`: enable flags, `dual_limit_price`, `dual_limit_shares`, hedge/trailing params, etc.
 
-Check out these demonstration videos to see the bot in action:
+---
 
-- [PumpFun Comment Bot Demo 1](https://drive.google.com/file/d/12cG11VyLE6QJ4brn6ijQSG1RTurBAqwY/view?usp=drive_link)
-- [PumpFun Comment Bot Demo 2](https://drive.google.com/file/d/1XdBldd3p7P6iQfXJ6y13gSLwdjxYmmND/view?usp=drive_link)
+## Bot versions
 
-## Features
+### 1. Dual Limit Same-Size Bot (0.45) — default
 
-- **Automated Commenting**: Post comments automatically on PumpFun token pages
-- **Smart Timing**: Configurable comment intervals and timing strategies
-- **Template System**: Customizable comment templates with dynamic content
-- **Multi-Account Support**: Manage multiple accounts for increased engagement
-- **Anti-Detection**: Built-in features to avoid detection and maintain account safety
-- **Analytics**: Track comment performance and engagement metrics
-- **Customizable Settings**: Fine-tune bot behavior and appearance
-- **Easy Configuration**: Simple setup with user-friendly interface
+**Binary:** `main_dual_limit_045_same_size`
 
-## Supported Platforms
+At market start (first ~5 s), places limit buys for BTC and enabled ETH/SOL/XRP Up/Down at $0.45. If **both** fill → done for that market. If **only one** fills, applies a **2-min / 4-min / early / standard** hedge: buy the unfilled side at market (same size), cancel the unfilled $0.45 limit.
 
-- PumpFun (Primary platform)
-- Compatible with Solana-based token projects
-- Extensible for other social platforms
+**Low-price exit (0.05 / 0.99 or 0.02 / 0.99):** Two limit sells (cheap at $0.05 or $0.02, opposite at $0.99) are placed only when:
+1. At least **10 minutes** have elapsed.
+2. The market was hedged via **4-min, early, or standard** (not 2-min).
+3. One side’s **bid** is below 0.10 (or below 0.03 for the 0.02/0.99 path when hedge price &lt; 0.60).
 
-## Environment Variables
-
-Create a `.env` file in the root directory with the following variables:
-
-```env
-# PumpFun Configuration
-PUMPFUN_API_URL=https://frontend-api.pump.fun
-PUMPFUN_WEBSOCKET_URL=wss://frontend-api.pump.fun
-
-# Bot Configuration
-COMMENT_INTERVAL=30000
-MAX_COMMENTS_PER_HOUR=20
-ACCOUNT_DELAY_MIN=5000
-ACCOUNT_DELAY_MAX=15000
-
-# Comment Templates
-COMMENT_TEMPLATES=template1,template2,template3
-RANDOMIZE_TEMPLATES=true
-
-# Account Management
-ACCOUNTS_FILE=accounts.json
-ACCOUNT_ROTATION=true
-
-# Safety Settings
-ANTI_DETECTION=true
-HUMAN_LIKE_DELAYS=true
-RANDOM_TYPING_SPEED=true
-
-# Logging
-LOG_LEVEL=info
-```
-
-## Installation
-
-1. Clone the repository
 ```bash
-git clone <repository-url>
-cd pumpfun-comment-bot
+# Simulation
+cargo run --bin main_dual_limit_045_same_size -- --simulation
+
+# Production (default binary)
+cargo run -- --no-simulation
 ```
 
-2. Install dependencies
+### 2. Dual Limit 5-Minute BTC Bot
+
+**Binary:** `main_dual_limit_045_5m_btc`
+
+Dual limit at $0.45 for **BTC 5-minute markets only**. Two windows: **2-min** (2–3 min), **3-min** (≥3 min), with bands and trailing stop (e.g. buy when ask ≥ lowest_ask + 0.03).
+
 ```bash
-npm install
+cargo run --bin main_dual_limit_045_5m_btc -- --config config.json --simulation
+cargo run --bin main_dual_limit_045_5m_btc -- --config config.json --no-simulation
 ```
 
-3. Configure environment variables
+### 3. Trailing Bot
+
+**Binary:** `main_trailing`
+
+Waits until one token’s price is **under 0.45**, then trails that token (trailing stop with 0.45 cap). After the first buy, uses **stop loss + trailing stop** for the opposite token.
+
 ```bash
-cp config.example.env .env
-# Edit .env with your configuration
+cargo run --bin main_trailing -- --simulation
+cargo run --bin main_trailing -- --no-simulation
 ```
 
-4. Set up accounts
+### 4. Backtest
+
+**Binary:** `backtest`
+
+Replays the dual-limit strategy on `history/market_*_prices.toml`: limit buys at $0.45, simulated fills, hedge logic, PnL. Requires existing price history files.
+
 ```bash
-# Create accounts.json file with your PumpFun accounts
-# See accounts.example.json for format
+cargo run --bin backtest -- --backtest
 ```
 
-5. Build the project
+---
+
+## Test binaries
+
+| Binary | Purpose |
+|--------|---------|
+| `test_limit_order` | Place a limit order (e.g. `--price-cents 60 --shares 10`) |
+| `test_redeem` | List/redeem winning tokens (`--list`, `--redeem-all`) |
+| `test_merge` | Merge complete sets to USDC (`--merge`) |
+| `test_allowance` | Check balance/allowance; set approval (`--approve-only`, `--list`) |
+| `test_sell` | Test market sell |
+| `test_predict_fun` | Test prediction/price logic |
+
+Example:
 ```bash
-npm run build
+cargo run --bin test_allowance -- --approve-only   # One-time approval for selling
+cargo run --bin test_redeem -- --list
 ```
 
-## Usage
-
-### Start the bot
-```bash
-npm start
-```
-
-### Development mode
-```bash
-npm run dev
-```
-
-### Interactive Menu
-
-The bot provides an interactive CLI with the following options:
-
-1. **Show Current Settings** - Display current configuration
-2. **Settings** - Configure bot parameters
-   - Comment templates
-   - Timing intervals
-   - Account management
-   - Safety settings
-3. **Start Commenting** - Begin automated commenting
-4. **Manage Accounts** - Add/remove accounts
-5. **View Analytics** - Check comment performance
-6. **Exit** - Close the application
-
-## Comment Strategy
-
-### Smart Commenting
-- Automatically posts comments on PumpFun token pages
-- Uses configurable templates with dynamic content
-- Implements human-like timing and behavior patterns
-
-### Account Management
-- Multi-account support for increased engagement
-- Account rotation to avoid detection
-- Random delays between account switches
-
-### Safety Features
-- Anti-detection mechanisms
-- Human-like typing speeds
-- Randomized comment intervals
-- Account cooldown periods
+---
 
 ## Configuration
 
-### Settings File
-The bot uses `settings.json` to store bot parameters:
+- **`--simulation`** / **`--no-simulation`** — No real orders in simulation.
+- **`--config <path>`** — Config file (default: `config.json`).
 
-```json
-{
-  "commentTemplates": [
-    "Great project! 🚀",
-    "This looks promising! 💎",
-    "Amazing work team! 🔥"
-  ],
-  "commentInterval": 30000,
-  "maxCommentsPerHour": 20,
-  "accountRotation": true
-}
-```
+**Config fields (summary):**
+- **polymarket:** `gamma_api_url`, `clob_api_url`, `api_key`, `api_secret`, `api_passphrase`, `private_key`, optional `proxy_wallet_address`, `signature_type`.
+- **trading:** `check_interval_ms`, `fixed_trade_amount`, `enable_btc_trading` / `enable_eth_trading` / etc., `dual_limit_price` (0.45), `dual_limit_shares`, `dual_limit_hedge_*`, `trailing_stop_point`, `trailing_shares`, etc.
 
-### Bot Parameters
-- **Comment Templates**: Predefined comment messages
-- **Timing Intervals**: Delay between comments
-- **Account Management**: Multi-account configuration
-- **Safety Settings**: Anti-detection parameters
+---
 
-## Architecture
+## Notes
 
-```
-src/
-├── constants/          # Configuration constants
-├── layout/            # Comment posting logic
-├── menu/              # CLI interface
-├── types/             # TypeScript type definitions
-├── utils/             # Utility functions
-├── templates/         # Comment templates
-└── accounts/          # Account management
-```
+- Bots run until you stop them (Ctrl+C).
+- Simulation mode logs trades but does not send orders.
+- **Before selling**, set on-chain approval once per proxy wallet:  
+  `cargo run --bin test_allowance -- --approve-only`
 
-## Dependencies
+---
 
-- **axios**: HTTP requests to PumpFun API
-- **ws**: WebSocket connections
-- **pino**: Structured logging
-- **chalk**: Terminal styling
-- **inquirer**: Interactive prompts
+## Security
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-ISC License - see LICENSE file for details
-
-## Disclaimer
-
-This software is for educational and research purposes only. Trading cryptocurrencies involves substantial risk of loss and is not suitable for all investors. The past performance of any trading system or methodology is not necessarily indicative of future results.
+- Do **not** commit `config.json` with real keys or secrets.
+- Prefer simulation and small sizes when testing.
+- Monitor logs and balances when running in production.
 
 ## Support
 
-For issues and questions:
-- Create an issue in the repository
-- Check the documentation
-- Review the configuration examples
-
-## Version History
-
-- **v2.0.0**: PumpFun Comment Bot with advanced features
-- **v1.x**: Basic commenting functionality
+If you have any questions or would like a more customized app for specific use cases, please feel free to contact us at the contact information below.
+- Discord: [@solzen33](https://t.me/solzen77)

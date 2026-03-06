@@ -1,5 +1,7 @@
-/node_modules
-
-/dist
-
-/settings.json
+/target
+**/*.rs.bk
+Cargo.lock
+config.json
+*.log
+history.toml
+.env
