@@ -23,8 +23,8 @@ Use at your own risk. For **educational & testing purposes** only. Not financial
 ### Stay Connected
 | Platform | Link | Purpose |
 |----------|------|---------|
-| Telegram | [t.me/solzen33](https://t.me/solzen33) | Announcements & Support |
-| X | [x.com/solzen33](https://x.com/solzen33) | News & Updates |
+| Telegram | [t.me/solzen33](https://t.me/solzen77) | Announcements & Support |
+| X | [x.com/solzen33](https://x.com/solzen77) | News & Updates |
 
 ## 📹 Sample Videos
 
