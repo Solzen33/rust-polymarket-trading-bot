@@ -2,7 +2,9 @@
 
 A Rust trading bot for [Polymarket](https://polymarket.com) that trades 15-minute price prediction markets using the **remain-5-mins** strategy: buy when a token’s price is ≥ $0.90 with at least 5 minutes remaining.
 
-**Monitor / screenshot:** [monitor.jpg](https://drive.google.com/file/d/16gLuDy8OgBVB1cJM2W3HSnfF35axRNcG/view?usp=drive_link)
+**Monitor / screenshot:**
+
+![monitor](https://drive.google.com/uc?export=view&id=16gLuDy8OgBVB1cJM2W3HSnfF35axRNcG)
 
 ---
 
