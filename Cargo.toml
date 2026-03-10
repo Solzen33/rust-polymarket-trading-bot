@@ -1,20 +1,13 @@
 [package]
 name = "polymarket-trading-bot"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-default-run = "main_dual_limit_045_same_size"
+default-run = "main_remain_5_mins"
+description = "Rust Polymarket trading bot — buy when token >= 0.90 with 5 min remaining"
 
 [[bin]]
-name = "main_dual_limit_045_same_size"
-path = "src/bin/main_dual_limit_045_same_size.rs"
-
-[[bin]]
-name = "main_dual_limit_045_5m_btc"
-path = "src/bin/main_dual_limit_045_5m_btc.rs"
-
-[[bin]]
-name = "main_trailing"
-path = "src/bin/main_trailing.rs"
+name = "main_remain_5_mins"
+path = "src/bin/main_remain_5_mins.rs"
 
 [[bin]]
 name = "backtest"

@@ -123,7 +123,7 @@ pub struct TradingConfig {
     /// Default: 10 (10 seconds) - faster retries for redemption
     pub market_closure_check_interval_seconds: u64,
     /// Minimum time remaining in seconds before allowing a buy
-    /// Default: 30 (30 seconds) - don't buy if less than 30 seconds remain
+    /// Default: 300 (5 minutes) - don't buy if less than 5 minutes remain
     /// This prevents buying too close to market close when prices can be volatile
     pub min_time_remaining_seconds: Option<u64>,
     /// Enable BTC market trading (trailing bot and others that support it)
@@ -207,7 +207,7 @@ impl Default for TradingConfig {
             stop_loss_price: Some(0.85),
             hedge_price: Some(0.5),
             market_closure_check_interval_seconds: 10,
-            min_time_remaining_seconds: Some(30),
+            min_time_remaining_seconds: Some(300),
             enable_btc_trading: true,
             enable_eth_trading: true,
             enable_solana_trading: false,
