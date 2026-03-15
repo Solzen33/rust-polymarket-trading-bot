@@ -1,7 +1,5 @@
-/target
-**/*.rs.bk
-Cargo.lock
-config.json
+node_modules/
+dist/
 *.log
-history.toml
 .env
+config.json
