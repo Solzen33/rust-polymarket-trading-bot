@@ -1,12 +1,86 @@
 # Polymarket Trading Bot (TypeScript)
 
-TypeScript port of [Polymarket-Trading-Bot-Rust](https://github.com/your-org/Polymarket-Trading-Bot-Rust). At each 15-minute market start, places limit buys for BTC (and optionally ETH, Solana, XRP) Up/Down at a fixed price (default $0.45).
+Polymarket trading bot (TypeScript) for 15-minute Up/Down crypto markets. Focuses on **reducing loss** for small and mid-size traders—not whale capital. At each new 15-minute period start, places limit buys for BTC and optionally ETH, Solana, XRP at a fixed price (default $0.45). Run in simulation or live on Polymarket CLOB.
+---
 
-## Bot logic (detailed)
+## Background & Strategy Evolution
+
+I built a bunch of Polymarket bots over time. At first I tried **arbitrage**. It was safe and the logic was clear, but the edge was small and the profits were tiny. After running it for a while I realized it wasn't really worth the effort for the returns I was getting. So I switched to strategies that aimed for **bigger profit**. When they hit, the gains were nice. But when they didn't, the drawdowns were big. For someone without whale-sized capital, one bad run can wipe out a lot of earlier work. I had to accept that chasing big profit with small size usually means you get big loss on the other side too.
+
+I thought about it for a long time. If you're not a whale, you can't rely on volume to smooth out variance. The only thing that really helps is **reducing loss** — keeping each period's risk and cost under control so that a few bad outcomes don't blow up the account. So I focused on that. I studied the markets, ran a lot of tests and simulations, and ended up with the approach in this repo: **dual limit at period start**. You buy both Up and Down at a fixed price (e.g. $0.45) only in the first ~2 seconds of each new 15m period. No fancy entries, no chasing. Just cap the cost per period and stick to the plan. that’s a bad trade.
+
+
+---
+
+## Contact
+
+- **Telegram:** [https://t.me/solzen77](https://t.me/solzen77)
+
+---
+
+## Strategy Overview (Diagrams)
+
+### Philosophy: From “Big Profit” to “Reduce Loss First”
+
+```mermaid
+flowchart LR
+  A[Arbitrage] -->|"Low profit"| B[High-risk / Big profit]
+  B -->|"Big loss too"| C[Reduce loss first]
+  C --> D[Current strategy: dual limit at period start]
+  style C fill:#e8f5e9
+  style D fill:#c8e6c9
+```
+
+### When the Bot Places Orders (Decision Flow)
+
+```mermaid
+flowchart TD
+  Start([Every check_interval e.g. 1s]) --> Snapshot[Fetch order books + time remaining]
+  Snapshot --> T1{Time remaining > 0?}
+  T1 -->|No| Wait[Wait next tick]
+  T1 -->|Yes| T2{Period already seen?}
+  T2 -->|No| Wait
+  T2 -->|Yes| T3{First ~2s of period?}
+  T3 -->|No| Wait
+  T3 -->|Yes| T4{Not already placed this period?}
+  T4 -->|No| Wait
+  T4 -->|Yes| Place[Place limit buys: Up + Down at fixed price]
+  Place --> Wait
+  Wait --> Start
+```
+
+### End-to-End Data Flow
+
+```mermaid
+flowchart TB
+  subgraph Init[Startup]
+    Config[Config + CLI]
+    Auth[Auth optional: wallet + CLOB]
+    Discover[Discover markets via Gamma API]
+    Config --> Auth --> Discover
+  end
+
+  subgraph Loop[Main loop]
+    CLOB[CLOB order books]
+    Snapshot[Snapshot: prices, time_remaining]
+    Condition{First 2s of period & not placed?}
+    Opportunities[Build opportunities: Up/Down per asset]
+    Execute[Place limit buy or simulate]
+    CLOB --> Snapshot --> Condition
+    Condition -->|Yes| Opportunities --> Execute
+    Condition -->|No| CLOB
+  end
+
+  Discover --> Loop
+```
+
+---
+
+## Bot Logic (Detailed)
 
 ### Strategy in one sentence
 
-Every time a **new 15-minute market period starts**, the bot places **limit BUY** orders for **Up** and **Down** tokens of the selected assets (BTC always; ETH/SOL/XRP if enabled) at a **fixed limit price** (e.g. $0.45). No market orders; no selling logic in this bot.
+Every time a **new 15-minute market period starts**, the bot places **limit BUY** orders for **Up** and **Down** tokens of the selected assets (BTC always; ETH/SOL/XRP if enabled) at a **fixed limit price** (e.g. $0.45). No market orders; no selling in this bot.
 
 ### Markets targeted
 
@@ -16,7 +90,7 @@ Every time a **new 15-minute market period starts**, the bot places **limit BUY*
 ### Startup sequence
 
 1. **Config & CLI**  
-   Loads `config.json` and parses `--simulation` / `--no-simulation` and `-c <path>`. Simulation = no real orders; dev/production = real CLOB orders.
+   Loads `config.json` and parses `--simulation` / `--no-simulation` and `-c <path>`. Simulation = no real orders; production = real CLOB orders.
 
 2. **Auth (if `private_key` set)**  
    Builds an ethers wallet and CLOB client, optionally derives or creates API key. If auth fails and mode is simulation, the bot continues with read-only market data.
@@ -72,20 +146,6 @@ For each such token, the bot creates a **buy opportunity** (limit price from con
 - **Simulation**: logs the order and records it in memory and in `history/YYYY-MM-DD.json`; no CLOB call.
 - **Production**: builds a CLOB client (with wallet + API creds), calls `createAndPostOrder` for a **GTC limit buy** at that price and size. Tracks the order in `pendingTrades` so we don’t double-place for the same (period, token type).
 
-### Data flow summary
-
-```
-Config + CLI
-    → Auth (optional)
-    → Discover markets (Gamma: slug → condition_id, token_ids)
-    → Loop:
-        → CLOB order books → snapshot (prices, time_remaining)
-        → If first ~2s of period and not yet placed this period:
-            → Build opportunities (Up/Down for enabled assets)
-            → For each: if no active position → place limit buy (or simulate)
-            → (Simulation only: append to history/YYYY-MM-DD.json)
-```
-
 ### What this bot does **not** do
 
 - No **selling** or closing positions.
@@ -93,24 +153,26 @@ Config + CLI
 - No **stop-loss**, **take-profit**, or **hedging** logic in the main loop (config has fields for them but they are unused in this dual-limit-start flow).
 - No **re-discovery** of markets inside the loop (markets are discovered once at startup).
 
-## Requirements
+---
+
+## Running the Bot (All Users)
+
+### Requirements
 
 - Node.js >= 18
-- `config.json` with Polymarket `private_key` (and optional API creds)
+- `config.json` with Polymarket `private_key` (and optional API creds) for real trading; **optional** for simulation
 
-## Setup
+### Setup
 
 ```bash
 npm install
 cp config.json.example config.json   # or copy from Rust project
-# Edit config.json: set polymarket.private_key (hex, with or without 0x)
+# Edit config.json: set polymarket.private_key (hex, with or without 0x) for real trading
 ```
-
-## Usage
 
 ### Simulation (no real orders)
 
-Simulation mode runs the same logic as production but **never sends orders** to Polymarket. It logs each “would-be” order and keeps a running summary (order count, total notional).
+Simulation runs the same logic as production but **never sends orders** to Polymarket. It logs each “would-be” order and keeps a running summary (order count, total notional).
 
 - **No `private_key` needed** for simulation: the bot can run with only `config.json` (or defaults) and will use read-only market data. CLOB auth is skipped if no key is set.
 - **Summary**: After each market start where orders would be placed, the bot logs:  
@@ -137,7 +199,7 @@ npm run build && npm run start:live
 npx tsx src/main-dual-limit-045.ts -c /path/to/config.json
 ```
 
-## Config
+### Config
 
 Same shape as the Rust bot:
 
@@ -147,6 +209,8 @@ Same shape as the Rust bot:
 - `trading.dual_limit_price` – limit price (default 0.45)
 - `trading.dual_limit_shares` – optional fixed shares per order
 - `trading.enable_eth_trading`, `enable_solana_trading`, `enable_xrp_trading` – enable extra markets
+
+---
 
 ## Project layout
 
@@ -160,9 +224,3 @@ Same shape as the Rust bot:
 - `src/simulation-history.ts` – save simulation results to `history/YYYY-MM-DD.json` (NDJSON by date)
 - `src/main-dual-limit-045.ts` – discover markets, monitor loop, place limit orders at period start; logs and saves simulation summary when in simulation mode
 
-## Build
-
-```bash
-npm run build
-node dist/main-dual-limit-045.js
-```
