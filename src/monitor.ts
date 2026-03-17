@@ -139,8 +139,14 @@ export async function fetchSnapshot(
 /** Format one token as "bid/ask" e.g. "$0.13/$0.14" */
 function fmtBidAsk(token: TokenPrice | null | undefined): string {
   if (!token) return "N/A";
-  const bid = token.bid != null ? `$${token.bid.toFixed(2)}` : "N/A";
-  const ask = token.ask != null ? `$${token.ask.toFixed(2)}` : "N/A";
+  const fmt = (p: number): string => {
+    if (p >= 1) return p.toFixed(4);
+    if (p >= 0.1) return p.toFixed(3);
+    if (p >= 0.01) return p.toFixed(4);
+    return p.toFixed(6);
+  };
+  const bid = token.bid != null ? `$${fmt(token.bid)}` : "N/A";
+  const ask = token.ask != null ? `$${fmt(token.ask)}` : "N/A";
   return `${bid}/${ask}`;
 }
 

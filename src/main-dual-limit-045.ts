@@ -172,25 +172,29 @@ async function main(): Promise<void> {
 
   const api = new PolymarketApi(config.polymarket);
   logger.info("═══════════════════════════════════════════════════════════");
-  logger.info("Authenticating with Polymarket CLOB API...");
-  logger.info("═══════════════════════════════════════════════════════════");
-  if (config.polymarket.private_key) {
-    try {
-      const client = await createClobClient(config.polymarket);
-      await client.getOk();
-      logger.info("Successfully authenticated with Polymarket CLOB API");
-      logger.info("Private key: Valid");
-      logger.info("API credentials: Valid");
-      logger.info("Trading account: EOA (private key account)");
-    } catch (e) {
-      logger.error("Authentication failed: " + String(e));
-      if (!simulation) throw e;
-      logger.info("Continuing in simulation mode with read-only market data.");
-    }
+  if (simulation) {
+    logger.info("Simulation mode: skipping CLOB authentication (no real account access).");
   } else {
-    logger.warn("No private_key in config - only simulation/read-only will work.");
+    logger.info("Authenticating with Polymarket CLOB API...");
+    logger.info("═══════════════════════════════════════════════════════════");
+    if (config.polymarket.private_key) {
+      try {
+        const client = await createClobClient(config.polymarket);
+        await client.getOk();
+        logger.info("Successfully authenticated with Polymarket CLOB API");
+        logger.info("Private key: Valid");
+        logger.info("API credentials: Valid");
+        logger.info("Trading account: EOA (private key account)");
+      } catch (e) {
+        logger.error("Authentication failed: " + String(e));
+        throw e;
+      }
+    } else {
+      logger.error("No private_key in config - live trading requires a private key.");
+      throw new Error("private_key is required for PRODUCTION mode");
+    }
+    logger.info("Authentication successful!");
   }
-  logger.info("Authentication successful!");
   logger.info("═══════════════════════════════════════════════════════════");
 
   logger.info("Discovering BTC, ETH, Solana, XRP markets...");
@@ -209,6 +213,7 @@ async function main(): Promise<void> {
 
   let lastPlacedPeriod: number | null = null;
   let lastSeenPeriod: number | null = null;
+  let currentMarketPeriod: number | null = null;
   const checkIntervalMs = config.trading.check_interval_ms ?? 1000;
 
   logger.info("Starting market monitoring...");
@@ -217,6 +222,7 @@ async function main(): Promise<void> {
   const nextPeriodStart = period + PERIOD_DURATION;
   const secondsUntilNext = nextPeriodStart - now;
   logger.info(`Current market period: ${period}, next period starts in ${secondsUntilNext} seconds`);
+  currentMarketPeriod = period;
 
   if (btcMarket.tokens?.length) {
     const up = btcMarket.tokens.find((t) => /up|1/i.test(t.outcome ?? ""));
@@ -230,6 +236,25 @@ async function main(): Promise<void> {
   for (;;) {
     const snapshot = await fetchSnapshot(api, ethMarket, btcMarket, solanaMarket, xrpMarket);
     logger.info(formatPrices(snapshot));
+
+    // If the 15-minute period rolled over, refresh markets so we get the new condition IDs/token IDs.
+    if (currentMarketPeriod === null || snapshot.period_timestamp !== currentMarketPeriod) {
+      currentMarketPeriod = snapshot.period_timestamp;
+      logger.info(`Detected new 15-minute period (${currentMarketPeriod}) - refreshing markets for latest tokens...`);
+      const refreshed = await getOrDiscoverMarkets(
+        api,
+        config.trading.enable_eth_trading,
+        config.trading.enable_solana_trading,
+        config.trading.enable_xrp_trading
+      );
+      ethMarket = refreshed.eth;
+      btcMarket = refreshed.btc;
+      solanaMarket = refreshed.solana;
+      xrpMarket = refreshed.xrp;
+      // Continue loop so next tick uses fresh markets + order books
+      await new Promise((r) => setTimeout(r, checkIntervalMs));
+      continue;
+    }
 
     if (snapshot.time_remaining_seconds === 0) {
       await new Promise((r) => setTimeout(r, checkIntervalMs));

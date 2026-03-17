@@ -80,20 +80,25 @@ export class PolymarketApi {
 
   /** CLOB: get order book for a token. Returns bids/asks (price as string). Best bid = highest, best ask = lowest. */
   async getOrderBook(tokenId: string): Promise<{ bids: Array<{ price: string; size: string }>; asks: Array<{ price: string; size: string }> }> {
-    const { data } = await axios.get<{
-      bids?: Array<{ price: string; size: string }>;
-      asks?: Array<{ price: string; size: string }>;
-      error?: string;
-    }>(`${this.clobUrl}/book`, {
-      params: { token_id: tokenId },
-      timeout: 10_000,
-    });
-    if (data?.error) {
+    try {
+      const { data } = await axios.get<{
+        bids?: Array<{ price: string; size: string }>;
+        asks?: Array<{ price: string; size: string }>;
+        error?: string;
+      }>(`${this.clobUrl}/book`, {
+        params: { token_id: tokenId },
+        timeout: 10_000,
+      });
+      if (data?.error) {
+        return { bids: [], asks: [] };
+      }
+      const bids = Array.isArray(data?.bids) ? data.bids : [];
+      const asks = Array.isArray(data?.asks) ? data.asks : [];
+      return { bids, asks };
+    } catch {
+      // On HTTP errors (including 404 for stale/invalid token ids), treat as empty book
       return { bids: [], asks: [] };
     }
-    const bids = Array.isArray(data?.bids) ? data.bids : [];
-    const asks = Array.isArray(data?.asks) ? data.asks : [];
-    return { bids, asks };
   }
 }
 
