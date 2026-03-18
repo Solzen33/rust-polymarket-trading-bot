@@ -157,6 +157,28 @@ For each such token, the bot creates a **buy opportunity** (limit price from con
 
 ## Running the Bot (All Users)
 
+### One-command run (recommended)
+
+This is the easiest way for normal users. It defaults to **simulation** (safe), creates `config.json` from `config.json.example` if missing, and makes live trading require an explicit confirmation.
+
+```bash
+npm install
+npm run bot
+```
+
+Optional:
+
+```bash
+# Force simulation (safe)
+npm run bot:simulation
+
+# Force live (will ask you to type LIVE, unless you add --yes-live)
+npm run bot:live
+
+# Use a different config path
+npm run bot -- -c path/to/config.json
+```
+
 ### Requirements
 
 - Node.js >= 18
