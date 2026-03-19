@@ -8,6 +8,7 @@
     "bot": "node scripts/run.mjs",
     "bot:simulation": "node scripts/run.mjs --simulation",
     "bot:live": "node scripts/run.mjs --live",
+    "report:test": "tsx src/strategy-test-report.ts",
     "build": "tsc",
     "start": "node --experimental-vm-modules dist/main-dual-limit-045.js",
     "start:live": "node --experimental-vm-modules dist/main-dual-limit-045.js --no-simulation",

@@ -234,6 +234,67 @@ Same shape as the Rust bot:
 
 ---
 
+## Strategy Test Results (Current Bot Logic)
+
+The following result uses the current 15-minute entry logic (period-start dual limit approach).
+
+### Overall
+
+| Metric | Value |
+|------|------:|
+| mode | 15m |
+| markets | 1,082 |
+| trades | 1,082 |
+| up_trades | 533 |
+| down_trades | 549 |
+| directional_accuracy | 53.05% |
+| win_rate | 53.05% |
+| avg_cost_per_trade | 50.3771 |
+| total_cost | 54508.0000 |
+| avg_pnl_per_trade | +2.6728 |
+| total_pnl | +2892.0000 |
+
+### Daily PnL (UTC)
+
+| Date | PnL | Trades | Win Rate |
+|------|----:|-------:|---------:|
+| 2026-03-06 | +116.0000 | 26 | 53.85% |
+| 2026-03-07 | +496.0000 | 96 | 56.25% |
+| 2026-03-08 | +38.0000 | 96 | 50.00% |
+| 2026-03-09 | +789.0000 | 96 | 59.38% |
+| 2026-03-10 | +217.0000 | 96 | 53.12% |
+| 2026-03-11 | +288.0000 | 96 | 53.12% |
+| 2026-03-12 | +274.0000 | 96 | 53.12% |
+| 2026-03-13 | -252.0000 | 96 | 46.88% |
+| 2026-03-14 | +68.0000 | 96 | 51.04% |
+| 2026-03-15 | +155.0000 | 96 | 52.08% |
+| 2026-03-16 | +278.0000 | 96 | 53.12% |
+| 2026-03-17 | +425.0000 | 96 | 55.21% |
+
+> Notes:
+> - These are strategy test/analysis results based on the current strategy logic, not a guarantee of future performance.
+> - Live performance can differ due to fill quality, latency, fees, liquidity, and market regime changes.
+
+### Generate this report from current bot data
+
+After running simulation/live and collecting order history in `history/`, generate the same style report:
+
+```bash
+npm run report:test
+```
+
+Optional:
+
+```bash
+# custom history directory
+npm run report:test -- --history-dir ./history
+
+# custom config (for gamma/clob API URLs)
+npm run report:test -- -c ./config.json
+```
+
+---
+
 ## Project layout
 
 - `src/config.ts` – load config, parse CLI args (`--simulation` / `--no-simulation`, `-c` config path)
