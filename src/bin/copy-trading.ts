@@ -188,7 +188,17 @@ async function main(): Promise<void> {
     seenTradeKeys: new Set<string>(),
   };
 
-  const pollOnce = async (doCopy: boolean): Promise<void> => {
+  const heartbeatEveryMs = Number(process.env.COPY_TRADING_HEARTBEAT_EVERY_MS ?? 15000);
+  let lastHeartbeatAt = Date.now();
+  let pollCount = 0;
+
+  const pollOnce = async (
+    doCopy: boolean
+  ): Promise<{ newTradeCount: number; copiedCount: number; errorsCount: number }> => {
+    let newTradeCount = 0;
+    let copiedCount = 0;
+    let errorsCount = 0;
+
     for (const trader of ct.traders) {
       try {
         const trades = await fetchTradesForUser(trader, conditionIdList, 30);
@@ -197,29 +207,49 @@ async function main(): Promise<void> {
           const key = tradeKey(t);
           if (state.seenTradeKeys.has(key)) continue;
           state.seenTradeKeys.add(key);
+          newTradeCount += 1;
+
           if (!doCopy || !state.copyRunning) continue;
           const outcome = t.outcome ?? (t.side === "BUY" ? "Yes" : "No");
           log(`📋 Copy ${t.side} ${outcome} | $${(t.price * t.size).toFixed(2)} | ${t.title?.slice(0, 40) ?? t.asset.slice(0, 16)}...`);
+          copiedCount += 1;
           await placeOrder(t.asset, copyAmountUsd, t.side);
         }
       } catch (e) {
+        errorsCount += 1;
         log(`Poll error for ${trader.slice(0, 10)}...: ${e}`);
         logger.error(`Poll error for ${trader.slice(0, 10)}...:`, e);
       }
     }
+
+    return { newTradeCount, copiedCount, errorsCount };
   };
 
   const pollLoop = async (): Promise<void> => {
-    await pollOnce(false); // seed seen keys so we don't copy old trades on startup
+    // Seed seen keys so we don't copy old trades on startup.
+    log("Seeding dedupe keys (polling once, no copying)...");
+    await pollOnce(false);
+
     while (true) {
-      await pollOnce(state.copyRunning);
+      pollCount += 1;
+      const result = await pollOnce(state.copyRunning);
+
+      const now = Date.now();
+      const shouldHeartbeat = now - lastHeartbeatAt >= heartbeatEveryMs;
+      if (shouldHeartbeat) {
+        lastHeartbeatAt = now;
+        log(
+          `Heartbeat: poll=${pollCount} copyRunning=${state.copyRunning ? "ON" : "OFF"} newTrades=${result.newTradeCount} copied=${result.copiedCount} dedupeKeys=${state.seenTradeKeys.size} errors=${result.errorsCount}`
+        );
+      }
+
       await new Promise((r) => setTimeout(r, pollIntervalMs));
     }
   };
 
   if (HEADLESS) {
     log(
-      `Copy-trading bot (${simulation ? "SIMULATION" : "LIVE"}) | Slugs: ${ct.slugs.length} | Traders: ${ct.traders.length} | $${copyAmountUsd}/trade | Poll ${pollIntervalMs}ms`
+      `Copy-trading bot (${simulation ? "SIMULATION" : "LIVE"}) | Slugs: ${ct.slugs.length} | Traders: ${ct.traders.length} | $${copyAmountUsd}/trade | Poll ${pollIntervalMs}ms | Heartbeat ${heartbeatEveryMs}ms`
     );
     log("Started from API (headless). Use API stop to terminate.");
     void pollLoop();
