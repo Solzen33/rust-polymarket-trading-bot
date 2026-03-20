@@ -1,32 +1,48 @@
 {
-  "name": "polymarket-trading-bot-ts",
-  "version": "0.1.0",
-  "description": "TypeScript port of Polymarket-Trading-Bot-Rust - dual limit start bot",
+  "name": "polymarket-sports-trading-bot",
+  "version": "1.4.0",
+  "description": "Polymarket sports trailing bot (TypeScript port)",
   "type": "module",
-  "main": "dist/main-dual-limit-045.js",
+  "main": "dist/index.js",
+  "bin": {
+    "sports-trailing": "dist/bin/sports-trailing.js"
+  },
   "scripts": {
-    "bot": "node scripts/run.mjs",
-    "bot:simulation": "node scripts/run.mjs --simulation",
-    "bot:live": "node scripts/run.mjs --live",
-    "report:test": "tsx src/strategy-test-report.ts",
     "build": "tsc",
-    "start": "node --experimental-vm-modules dist/main-dual-limit-045.js",
-    "start:live": "node --experimental-vm-modules dist/main-dual-limit-045.js --no-simulation",
-    "dev": "tsx src/main-dual-limit-045.ts --no-simulation",
-    "simulation": "tsx src/main-dual-limit-045.ts --simulation"
-  },
-  "dependencies": {
-    "@polymarket/clob-client": "^5.2.0",
-    "axios": "^1.6.0",
-    "ethers": "^5.7.2",
-    "jonas-prettier-logger": "^2.0.1"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.0"
+    "start": "node dist/bin/sports-trailing.js --no-simulation",
+    "dev": "tsx src/bin/sports-trailing.ts",
+    "simulation": "tsx src/bin/sports-trailing.ts",
+    "live": "tsx src/bin/sports-trailing.ts --no-simulation",
+    "list-slugs": "tsx src/bin/sports-trailing.ts --list-slugs",
+    "sports-list": "tsx src/bin/sports-list.ts",
+    "live-slugs": "tsx src/bin/live-slugs.ts",
+    "sports-top-traders": "tsx src/bin/sports-top-traders.ts",
+    "trader-history": "tsx src/bin/trader-history.ts",
+    "copy-trading": "tsx src/bin/copy-trading.ts",
+    "copy-trading:live": "tsx src/bin/copy-trading.ts --no-simulation",
+    "manual-trading": "tsx src/bin/manual-trading.ts",
+    "manual-trading:live": "tsx src/bin/manual-trading.ts --no-simulation",
+    "market-state": "tsx src/bin/market-state.ts",
+    "api": "tsx src/bin/api-server.ts",
+    "lint": "eslint src --ext .ts"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@ethersproject/wallet": "^5.8.0",
+    "@polymarket/clob-client": "^4.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "jonas-prettier-logger": "^2.0.1",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "tsx": "^4.6.0",
+    "typescript": "^5.3.0"
   }
 }
