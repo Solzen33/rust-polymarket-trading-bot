@@ -37,7 +37,13 @@ export interface PeriodPnlSummary {
   openLeftoverCount: number;
 }
 
-const REASONS: CloseReason[] = ["take_profit", "stop_loss", "period_rollover", "late_take_profit"];
+const REASONS: CloseReason[] = [
+  "take_profit",
+  "stop_loss",
+  "period_rollover",
+  "late_take_profit",
+  "late_stop_loss",
+];
 const SIDES: TokenSide[] = ["UP", "DOWN"];
 
 function emptyByReason(): Record<CloseReason, { count: number; pnl: number }> {
@@ -158,7 +164,7 @@ export function formatPeriodPnlBanner(s: PeriodPnlSummary): string[] {
   );
   for (const L of s.lines) {
     const idShort = L.positionId.slice(0, 8);
-    const reasonPad = L.closeReason.padEnd(13);
+    const reasonPad = L.closeReason.padEnd(16);
     out.push(
       `  ${idShort}… | ${L.side.padEnd(4)} | ${String(L.shares).padStart(2)} | ` +
         `${L.buyPrice.toFixed(4).padStart(9)} | ${L.closePrice.toFixed(4).padStart(7)} | ${reasonPad} | ` +
