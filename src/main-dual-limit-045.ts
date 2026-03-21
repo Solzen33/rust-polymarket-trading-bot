@@ -157,8 +157,7 @@ async function main(): Promise<void> {
   logger.info("Mode: " + (simulation ? "SIMULATION" : "PRODUCTION"));
   if (simulation) {
     logger.info("No real orders will be placed. Simulated orders are tracked for summary.");
-    if (!config.polymarket.private_key)
-      logger.warn("No private_key in config: using read-only market data (no CLOB auth).");
+    logger.info("Simulation uses the same polymarket.private_key as live (wallet is verified; orders stay simulated).");
   }
   const limitPrice = config.trading.dual_limit_price ?? LIMIT_PRICE;
   const limitShares = config.trading.dual_limit_shares ?? null;
@@ -172,29 +171,28 @@ async function main(): Promise<void> {
 
   const api = new PolymarketApi(config.polymarket);
   logger.info("═══════════════════════════════════════════════════════════");
-  if (simulation) {
-    logger.info("Simulation mode: skipping CLOB authentication (no real account access).");
-  } else {
-    logger.info("Authenticating with Polymarket CLOB API...");
-    logger.info("═══════════════════════════════════════════════════════════");
-    if (config.polymarket.private_key) {
-      try {
-        const client = await createClobClient(config.polymarket);
-        await client.getOk();
-        logger.info("Successfully authenticated with Polymarket CLOB API");
-        logger.info("Private key: Valid");
-        logger.info("API credentials: Valid");
-        logger.info("Trading account: EOA (private key account)");
-      } catch (e) {
-        logger.error("Authentication failed: " + String(e));
-        throw e;
-      }
-    } else {
-      logger.error("No private_key in config - live trading requires a private key.");
-      throw new Error("private_key is required for PRODUCTION mode");
-    }
-    logger.info("Authentication successful!");
+  logger.info("Authenticating with Polymarket CLOB API (required for simulation and live)...");
+  logger.info("═══════════════════════════════════════════════════════════");
+  if (!config.polymarket.private_key) {
+    logger.error("polymarket.private_key is required in config.json for both simulation and live trading.");
+    throw new Error("private_key is required");
   }
+  try {
+    const client = await createClobClient(config.polymarket);
+    await client.getOk();
+    logger.info("Successfully authenticated with Polymarket CLOB API");
+    logger.info("Wallet (private_key): OK — using EOA from config");
+    logger.info("CLOB API key: from config, or derived/created from the wallet when omitted");
+    if (simulation) {
+      logger.info("Simulation mode: limit orders will be logged only (no real CLOB orders).");
+    } else {
+      logger.info("Live mode: real limit orders will be sent to Polymarket.");
+    }
+  } catch (e) {
+    logger.error("Authentication failed: " + String(e));
+    throw e;
+  }
+  logger.info("Authentication successful!");
   logger.info("═══════════════════════════════════════════════════════════");
 
   logger.info("Discovering BTC, ETH, Solana, XRP markets...");

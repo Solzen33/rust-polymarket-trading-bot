@@ -44,13 +44,15 @@ export async function createClobClient(cfg: Config["polymarket"]): Promise<ClobC
         }
       } catch (e) {
         throw new Error(
-          "CLOB API key failed: create and derive both failed. If you already have a key, add api_key, api_secret, api_passphrase to config.json (from polymarket.com/settings?tab=builder). Error: " +
+          "CLOB API key failed: could not derive or create from your wallet. You only need polymarket.private_key in config.json for normal use. Optional: add api_key, api_secret, api_passphrase if you use pre-registered CLOB credentials. Error: " +
             String(e instanceof Error ? e.message : e)
         );
       }
     }
     if (!creds) {
-      throw new Error("CLOB API key derivation/creation returned no credentials. Add api_key, api_secret, api_passphrase to config.json.");
+      throw new Error(
+        "CLOB API key derivation/creation returned no credentials. Ensure polymarket.private_key is set. Optional: add api_key, api_secret, api_passphrase to config.json."
+      );
     }
     return new ClobClient(host, Chain.POLYGON, wallet, creds);
   }

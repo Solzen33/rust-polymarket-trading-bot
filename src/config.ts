@@ -4,9 +4,14 @@ import { join } from "path";
 export interface PolymarketConfig {
   gamma_api_url: string;
   clob_api_url: string;
+  /**
+   * Optional Polymarket CLOB API credentials. If omitted, `createClobClient` derives or creates
+   * an API key using the wallet from `private_key` (live trading only).
+   */
   api_key: string | null;
   api_secret: string | null;
   api_passphrase: string | null;
+  /** Required for both simulation and live (wallet verification). Simulation still avoids real orders. */
   private_key: string | null;
   proxy_wallet_address: string | null;
   signature_type: number | null;
@@ -73,14 +78,38 @@ const DEFAULT_CONFIG: Config = {
   },
 };
 
+function emptyToNull(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = String(v).trim();
+  return t.length ? t : null;
+}
+
+/** Merge file config with defaults; normalize empty strings to null for credential fields. */
 export function loadConfig(configPath: string = "config.json"): Config {
   const path = join(process.cwd(), configPath);
-  if (existsSync(path)) {
-    const content = readFileSync(path, "utf-8");
-    return JSON.parse(content) as Config;
+  if (!existsSync(path)) {
+    writeFileSync(path, JSON.stringify(DEFAULT_CONFIG, null, 2));
+    return DEFAULT_CONFIG;
   }
-  writeFileSync(path, JSON.stringify(DEFAULT_CONFIG, null, 2));
-  return DEFAULT_CONFIG;
+  const content = readFileSync(path, "utf-8");
+  const parsed = JSON.parse(content) as Partial<Config>;
+
+  const polymarket: PolymarketConfig = {
+    ...DEFAULT_CONFIG.polymarket,
+    ...(parsed.polymarket ?? {}),
+  };
+  polymarket.api_key = emptyToNull(polymarket.api_key ?? undefined);
+  polymarket.api_secret = emptyToNull(polymarket.api_secret ?? undefined);
+  polymarket.api_passphrase = emptyToNull(polymarket.api_passphrase ?? undefined);
+  polymarket.private_key = emptyToNull(polymarket.private_key ?? undefined);
+  polymarket.proxy_wallet_address = emptyToNull(polymarket.proxy_wallet_address ?? undefined);
+
+  const trading: TradingConfig = {
+    ...DEFAULT_CONFIG.trading,
+    ...(parsed.trading ?? {}),
+  };
+
+  return { polymarket, trading };
 }
 
 export function parseArgs(): { simulation: boolean; config: string } {

@@ -92,8 +92,8 @@ Every time a **new 15-minute market period starts**, the bot places **limit BUY*
 1. **Config & CLI**  
    Loads `config.json` and parses `--simulation` / `--no-simulation` and `-c <path>`. Simulation = no real orders; production = real CLOB orders.
 
-2. **Auth (if `private_key` set)**  
-   Builds an ethers wallet and CLOB client, optionally derives or creates API key. If auth fails and mode is simulation, the bot continues with read-only market data.
+2. **Auth (simulation and live)**  
+   Builds a wallet from `polymarket.private_key` and a CLOB client (same startup check for both modes). If you do not set `api_key` / `api_secret` / `api_passphrase`, the client **derives or creates** a CLOB API key from the wallet. **Simulation** still authenticates the wallet but **does not** send real orders.
 
 3. **Market discovery**  
    For each asset (BTC, and ETH/SOL/XRP if enabled), finds the **current** 15-min market by slug pattern:
@@ -144,7 +144,7 @@ For each such token, the bot creates a **buy opportunity** (limit price from con
   - If `trading.dual_limit_shares` is set → use that as the number of shares per order.
   - Else → `fixed_trade_amount / bid_price` (e.g. $4.5 / 0.45 ≈ 10 shares).
 - **Simulation**: logs the order and records it in memory and in `history/YYYY-MM-DD.json`; no CLOB call.
-- **Production**: builds a CLOB client (with wallet + API creds), calls `createAndPostOrder` for a **GTC limit buy** at that price and size. Tracks the order in `pendingTrades` so we don’t double-place for the same (period, token type).
+- **Production**: builds a CLOB client from `private_key` (API key triple optional — derived from wallet if missing), calls `createAndPostOrder` for a **GTC limit buy** at that price and size. Tracks the order in `pendingTrades` so we don’t double-place for the same (period, token type).
 
 ### What this bot does **not** do
 
@@ -182,14 +182,15 @@ npm run bot -- -c path/to/config.json
 ### Requirements
 
 - Node.js >= 18
-- `config.json` with Polymarket `private_key` (and optional API creds) for real trading; **optional** for simulation
+- `config.json`: **live trading** needs `polymarket.private_key` only (API key triple is optional — derived from the wallet if omitted). **Simulation** needs no `private_key`.
 
 ### Setup
 
 ```bash
 npm install
 cp config.json.example config.json   # or copy from Rust project
-# Edit config.json: set polymarket.private_key (hex, with or without 0x) for real trading
+# Set polymarket.private_key (hex, with or without 0x) for both simulation and live.
+# Optional: api_key, api_secret, api_passphrase — omit to derive CLOB API key from the wallet.
 ```
 
 ### Simulation (no real orders)
@@ -207,7 +208,7 @@ npm run simulation
 
 ### Real trading (production)
 
-Requires `config.json` with `polymarket.private_key` (and optionally API key/secret/passphrase). Places real limit orders on Polymarket.
+Requires `config.json` with `polymarket.private_key`. CLOB API credentials are **optional** (derived from the wallet when omitted). Places real limit orders on Polymarket.
 
 ```bash
 npm run dev
@@ -226,7 +227,8 @@ npx tsx src/main-dual-limit-045.ts -c /path/to/config.json
 Same shape as the Rust bot:
 
 - `polymarket.gamma_api_url`, `polymarket.clob_api_url` – API base URLs
-- `polymarket.private_key` – EOA private key (hex); **optional for simulation** (leave empty to run without CLOB auth)
+- `polymarket.private_key` – EOA private key (hex); **required for simulation and live**
+- `polymarket.api_key`, `api_secret`, `api_passphrase` – **optional**; if omitted, CLOB API keys are derived from `private_key`
 - `polymarket.proxy_wallet_address` – optional proxy/Magic wallet
 - `trading.dual_limit_price` – limit price (default 0.45)
 - `trading.dual_limit_shares` – optional fixed shares per order
