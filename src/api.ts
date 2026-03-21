@@ -7,20 +7,15 @@ import axios, { AxiosInstance } from "axios";
 import { Market, Token } from "./types.js";
 import type { Config } from "./config.js";
 
-/** Polygon chain id (reserved for future CLOB helpers; order placement uses `clob.ts`). */
-const POLYGON_CHAIN_ID = 137;
-
 /** Thin wrapper around Gamma + CLOB base URLs from config. */
 export class PolymarketApi {
   private gammaUrl: string;
   private clobUrl: string;
-  private config: Config["polymarket"];
   private gammaClient: AxiosInstance;
 
   constructor(cfg: Config["polymarket"]) {
     this.gammaUrl = cfg.gamma_api_url.replace(/\/$/, "");
     this.clobUrl = cfg.clob_api_url.replace(/\/$/, "");
-    this.config = cfg;
     this.gammaClient = axios.create({
       baseURL: this.gammaUrl,
       timeout: 15_000,
@@ -31,15 +26,6 @@ export class PolymarketApi {
   /** Base URL for CLOB REST (books, markets). */
   getClobUrl(): string {
     return this.clobUrl;
-  }
-
-  /** Exposed for {@link Trader} when building a live CLOB client. */
-  getPrivateKey(): string | null {
-    return this.config.private_key;
-  }
-
-  getProxyWalletAddress(): string | null {
-    return this.config.proxy_wallet_address;
   }
 
   /** Gamma: get event by slug; returns first market from event.markets (tokens may be empty; use getMarketByConditionId for tokens) */
@@ -110,6 +96,3 @@ export class PolymarketApi {
     }
   }
 }
-
-// Re-export for clob client usage
-export { POLYGON_CHAIN_ID };

@@ -1,59 +1,27 @@
 /**
- * @fileoverview Loads and normalizes `config.json`.
- * - Merges partial files with {@link DEFAULT_CONFIG}.
- * - Trims credential strings; empty strings become `null` so optional fields behave consistently.
- * - {@link parseArgs} reads `--simulation` / `--no-simulation` and `-c` / `--config`.
+ * Loads `config.json`: Polymarket API URLs and wallet / optional CLOB API credentials.
  */
 
 import { readFileSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
+import { DEFAULT_TRADING_TOGGLES, type TradingToggles } from "./trading-assets.js";
 
 export interface PolymarketConfig {
   gamma_api_url: string;
   clob_api_url: string;
-  /**
-   * Optional Polymarket CLOB API credentials. If omitted, `createClobClient` derives or creates
-   * an API key using the wallet from `private_key`.
-   */
   api_key: string | null;
   api_secret: string | null;
   api_passphrase: string | null;
-  /** Required for both simulation and live (wallet verification). Simulation still avoids real orders. */
+  /** Required for live trading; optional for read-only simulation. */
   private_key: string | null;
   proxy_wallet_address: string | null;
   signature_type: number | null;
 }
 
-/** Strategy and market toggles for the dual-limit bot (see README for which fields the main loop uses). */
-export interface TradingConfig {
-  eth_condition_id: string | null;
-  btc_condition_id: string | null;
-  solana_condition_id: string | null;
-  xrp_condition_id: string | null;
-  /** Main loop sleep between snapshots (ms). */
-  check_interval_ms: number;
-  /** Used to size orders when `dual_limit_shares` is not set: shares ≈ fixed_trade_amount / bid_price. */
-  fixed_trade_amount: number;
-  trigger_price: number;
-  min_elapsed_minutes: number;
-  sell_price: number;
-  max_buy_price: number | null;
-  stop_loss_price: number | null;
-  hedge_price: number | null;
-  market_closure_check_interval_seconds: number;
-  min_time_remaining_seconds: number | null;
-  enable_eth_trading: boolean;
-  enable_solana_trading: boolean;
-  enable_xrp_trading: boolean;
-  /** Limit price for period-start buys (e.g. 0.45). */
-  dual_limit_price: number | null;
-  /** If set, fixed share count per limit order; else derived from `fixed_trade_amount`. */
-  dual_limit_shares: number | null;
-}
-
 export interface Config {
   polymarket: PolymarketConfig;
-  trading: TradingConfig;
+  /** Which 15m crypto UP/DOWN markets to trade (each gets its own strategy state). */
+  trading: TradingToggles;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -67,27 +35,7 @@ const DEFAULT_CONFIG: Config = {
     proxy_wallet_address: null,
     signature_type: null,
   },
-  trading: {
-    eth_condition_id: null,
-    btc_condition_id: null,
-    solana_condition_id: null,
-    xrp_condition_id: null,
-    check_interval_ms: 1000,
-    fixed_trade_amount: 1,
-    trigger_price: 0.9,
-    min_elapsed_minutes: 10,
-    sell_price: 0.99,
-    max_buy_price: 0.95,
-    stop_loss_price: 0.85,
-    hedge_price: 0.5,
-    market_closure_check_interval_seconds: 10,
-    min_time_remaining_seconds: 30,
-    enable_eth_trading: false,
-    enable_solana_trading: false,
-    enable_xrp_trading: false,
-    dual_limit_price: 0.45,
-    dual_limit_shares: null,
-  },
+  trading: { ...DEFAULT_TRADING_TOGGLES },
 };
 
 function emptyToNull(v: string | null | undefined): string | null {
@@ -96,7 +44,6 @@ function emptyToNull(v: string | null | undefined): string | null {
   return t.length ? t : null;
 }
 
-/** Merge file config with defaults; normalize empty strings to null for credential fields. */
 export function loadConfig(configPath: string = "config.json"): Config {
   const path = join(process.cwd(), configPath);
   if (!existsSync(path)) {
@@ -116,23 +63,10 @@ export function loadConfig(configPath: string = "config.json"): Config {
   polymarket.private_key = emptyToNull(polymarket.private_key ?? undefined);
   polymarket.proxy_wallet_address = emptyToNull(polymarket.proxy_wallet_address ?? undefined);
 
-  const trading: TradingConfig = {
-    ...DEFAULT_CONFIG.trading,
+  const trading: TradingToggles = {
+    ...DEFAULT_TRADING_TOGGLES,
     ...(parsed.trading ?? {}),
   };
 
   return { polymarket, trading };
-}
-
-/** CLI: `--simulation` (default), `--no-simulation` for live; `-c` / `--config` for config path. */
-export function parseArgs(): { simulation: boolean; config: string } {
-  const args = process.argv.slice(2);
-  let simulation = true;
-  let config = "config.json";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--no-simulation") simulation = false;
-    else if (args[i] === "--simulation") simulation = true;
-    else if (args[i] === "-c" || args[i] === "--config") config = args[++i] ?? config;
-  }
-  return { simulation, config };
 }

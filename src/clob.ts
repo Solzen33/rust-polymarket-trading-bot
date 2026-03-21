@@ -1,6 +1,6 @@
 /**
  * @fileoverview Polymarket CLOB trading: wallet-backed `ClobClient`, optional API key triple,
- * and `placeLimitOrder` (GTC) for live order placement from `trader.ts`.
+ * and `placeLimitOrder` (GTC) for live order placement.
  */
 
 import { ethers } from "ethers";

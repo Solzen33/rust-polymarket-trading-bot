@@ -1,311 +1,350 @@
-# Polymarket Trading Bot (TypeScript)
+# Polymarket 15m UP/DOWN trading bot (TypeScript)
 
-Polymarket trading bot (TypeScript) for 15-minute Up/Down crypto markets. Focuses on **reducing loss** for small and mid-size traders—not whale capital. At each new 15-minute period start, places limit buys for BTC and optionally ETH, Solana, XRP at a fixed price (default $0.45). Run in simulation or live on Polymarket CLOB.
----
+TypeScript bot for Polymarket **15-minute crypto Up/Down** markets. It polls CLOB books, runs a **threshold strategy** per asset (buy on upward price cross, multiple concurrent positions, per-position take-profit / stop-loss), logs live quotes, prints **period-end PnL**, and persists **trade history** to JSONL for reporting.
 
-## Background & Strategy Evolution
-
-I built a bunch of Polymarket bots over time. At first I tried **arbitrage**. It was safe and the logic was clear, but the edge was small and the profits were tiny. After running it for a while I realized it wasn't really worth the effort for the returns I was getting. So I switched to strategies that aimed for **bigger profit**. When they hit, the gains were nice. But when they didn't, the drawdowns were big. For someone without whale-sized capital, one bad run can wipe out a lot of earlier work. I had to accept that chasing big profit with small size usually means you get big loss on the other side too.
-
-I thought about it for a long time. If you're not a whale, you can't rely on volume to smooth out variance. The only thing that really helps is **reducing loss** — keeping each period's risk and cost under control so that a few bad outcomes don't blow up the account. So I focused on that. I studied the markets, ran a lot of tests and simulations, and ended up with the approach in this repo: **dual limit at period start**. You buy both Up and Down at a fixed price (e.g. $0.45) only in the first ~2 seconds of each new 15m period. No fancy entries, no chasing. Just cap the cost per period and stick to the plan. that’s a bad trade.
-
+**Prices** are Polymarket-style decimals in **\[0, 1\]** (e.g. `0.45` ≈ 45¢ per share). Live orders use **GTC limits**; fills are not guaranteed instant.
 
 ---
 
-## Contact
+## Features
 
-- **Telegram:** [https://t.me/solzen77](https://t.me/solzen77)
-
----
-
-## Strategy Overview (Diagrams)
-
-### Philosophy: From “Big Profit” to “Reduce Loss First”
-
-```mermaid
-flowchart LR
-  A[Arbitrage] -->|"Low profit"| B[High-risk / Big profit]
-  B -->|"Big loss too"| C[Reduce loss first]
-  C --> D[Current strategy: dual limit at period start]
-  style C fill:#e8f5e9
-  style D fill:#c8e6c9
-```
-
-### When the Bot Places Orders (Decision Flow)
-
-```mermaid
-flowchart TD
-  Start([Every check_interval e.g. 1s]) --> Snapshot[Fetch order books + time remaining]
-  Snapshot --> T1{Time remaining > 0?}
-  T1 -->|No| Wait[Wait next tick]
-  T1 -->|Yes| T2{Period already seen?}
-  T2 -->|No| Wait
-  T2 -->|Yes| T3{First ~2s of period?}
-  T3 -->|No| Wait
-  T3 -->|Yes| T4{Not already placed this period?}
-  T4 -->|No| Wait
-  T4 -->|Yes| Place[Place limit buys: Up + Down at fixed price]
-  Place --> Wait
-  Wait --> Start
-```
-
-### End-to-End Data Flow
-
-```mermaid
-flowchart TB
-  subgraph Init[Startup]
-    Config[Config + CLI]
-    Auth[Auth optional: wallet + CLOB]
-    Discover[Discover markets via Gamma API]
-    Config --> Auth --> Discover
-  end
-
-  subgraph Loop[Main loop]
-    CLOB[CLOB order books]
-    Snapshot[Snapshot: prices, time_remaining]
-    Condition{First 2s of period & not placed?}
-    Opportunities[Build opportunities: Up/Down per asset]
-    Execute[Place limit buy or simulate]
-    CLOB --> Snapshot --> Condition
-    Condition -->|Yes| Opportunities --> Execute
-    Condition -->|No| CLOB
-  end
-
-  Discover --> Loop
-```
+| Area | Behavior |
+|------|-----------|
+| **Assets** | BTC, ETH, SOL, XRP — each enabled asset gets its own `ThresholdStrategy` + `PositionManager`; one shared CLOB client for orders. |
+| **Buy** | When UP or DOWN **mid** crosses **up** through `buyPrice` (default `0.45`). Multiple opens allowed; each position tracked separately. |
+| **Sell** | Per position: **take profit** at `takeProfitPrice` (default `0.65`), **stop loss** at `stopLossPrice` (default `0.15`). |
+| **Time gate** | No **new standard** buys when `time_remaining_seconds ≤ minRemainingSeconds` (default **300** = 5 min). Existing positions still managed. |
+| **Late phase (last 5 min)** | While `time_remaining ≤ latePhaseWindowSeconds` (default **300**): **buy** on upward cross of `latePhaseBuyPrice` (default **0.85**) if that side has **no** open position; **take profit** when mid ≥ `latePhaseSellPrice` (default **0.95**); **stop loss** when mid ≤ `latePhaseStopLossPrice` (default **0.55**). Same **one position per side** rule. Disable with `latePhaseEnabled: false`. |
+| **Period rollover** | On new 15m period, open positions are rolled off (sell attempt + tracker close); **MARKET END PnL** banner per asset. |
+| **Logging** | **QUOTE [ASSET]** each poll: bid / ask / mid for UP and DOWN. |
+| **History** | Each close → append `trade_close` line to `history/YYYY-MM-DD.jsonl` (UTC). Bot start → `session` line. |
+| **Report** | `npm run report` aggregates `history/*.jsonl` into a strategy summary + daily PnL (UTC). |
 
 ---
 
-## Bot Logic (Detailed)
+## Requirements
 
-### Strategy in one sentence
-
-Every time a **new 15-minute market period starts**, the bot places **limit BUY** orders for **Up** and **Down** tokens of the selected assets (BTC always; ETH/SOL/XRP if enabled) at a **fixed limit price** (e.g. $0.45). No market orders; no selling in this bot.
-
-### Markets targeted
-
-- **Polymarket 15-minute Up/Down markets**: e.g. “Will BTC go up or down in the next 15 minutes?” Each period has two outcome tokens: **Up** (yes) and **Down** (no). The bot buys both at a fixed price at the start of the period.
-- **Period**: 900 seconds (15 min). Period boundaries are aligned to Unix time: `period_timestamp = floor(now / 900) * 900`.
-
-### Startup sequence
-
-1. **Config & CLI**  
-   Loads `config.json` and parses `--simulation` / `--no-simulation` and `-c <path>`. Simulation = no real orders; production = real CLOB orders.
-
-2. **Auth (simulation and live)**  
-   Builds a wallet from `polymarket.private_key` and a CLOB client (same startup check for both modes). If you do not set `api_key` / `api_secret` / `api_passphrase`, the client **derives or creates** a CLOB API key from the wallet. **Simulation** still authenticates the wallet but **does not** send real orders.
-
-3. **Market discovery**  
-   For each asset (BTC, and ETH/SOL/XRP if enabled), finds the **current** 15-min market by slug pattern:
-   - `{asset}-updown-15m-{period_timestamp}` (e.g. `btc-updown-15m-1739462400`).
-   - For BTC/ETH, also tries **previous** periods (up to 3 × 15 min back) if the current one isn’t found.
-   - Uses Polymarket **Gamma API** (event/market by slug) and ensures the market is active and not closed. Stores condition IDs and token IDs for Up/Down.
-
-4. **Main loop**  
-   Runs forever, every `check_interval_ms` (default 1 s):
-   - Fetches a **snapshot**: order book (best bid/ask) for each market’s Up and Down tokens via CLOB, plus **time remaining** in the current period (`end_time - now`).
-   - Logs a price line: e.g. `BTC: U$0.48/$0.52 D$0.45/$0.49 | ETH: ... | ⏱️ 14m 32s`.
-
-### When does the bot place orders?
-
-Orders are placed **only when all** of the following are true:
-
-1. **Time remaining > 0** (market not yet ended).
-2. **Period has been seen** (so we know we’re in a valid period).
-3. **"Just after" period start**: `time_elapsed = 900 - time_remaining` is **≤ 2 seconds**. So we act in the first ~2 seconds of the new period only.
-4. **Not already placed this period**: `lastPlacedPeriod !== current period`. So we place **once per period**, right after it starts.
-5. **There are opportunities**: at least one Up or Down token is available for the enabled markets (BTC + any of ETH/SOL/XRP that are enabled).
-
-If any of these fail, the loop just waits and repeats.
-
-### Buy point (when we buy)
-
-| What | Value |
-|------|--------|
-| **When** | First **0–2 seconds** after a new 15-minute period starts |
-| **Clock** | `time_remaining_seconds` between **898 and 900** (so `time_elapsed = 900 - time_remaining` is 0–2) |
-| **How often** | **Once per period** (then `lastPlacedPeriod` blocks until the next period) |
-| **Price** | Fixed limit: `trading.dual_limit_price` (e.g. **$0.45**) |
-| **Tokens** | One limit buy for **Up**, one for **Down**, for each enabled asset (e.g. BTC only if others disabled) |
-
-So the **buy point** is: as soon as the new 15-min window starts (first 2 seconds), the bot places all limit buys at the configured price, then does nothing else until the next period.
-
-### What gets traded (opportunities)
-
-- **BTC**: always — BTC Up and BTC Down (if the market has both tokens).
-- **ETH / Solana / XRP**: only if `enable_eth_trading` / `enable_solana_trading` / `enable_xrp_trading` are `true` in config.
-
-For each such token, the bot creates a **buy opportunity** (limit price from config, token ID, condition ID, period). It then tries to place a **limit buy** for each opportunity, **skipping** any (period, token type) for which it already has an active position in this run (to avoid duplicate orders in the same period).
-
-### Order execution (Trader)
-
-- **Limit price**: from `trading.dual_limit_price` (e.g. 0.45).
-- **Size (shares)**:
-  - If `trading.dual_limit_shares` is set → use that as the number of shares per order.
-  - Else → `fixed_trade_amount / bid_price` (e.g. $4.5 / 0.45 ≈ 10 shares).
-- **Simulation**: logs the order and records it in memory and in `history/YYYY-MM-DD.json`; no CLOB call.
-- **Production**: builds a CLOB client from `private_key` (API key triple optional — derived from wallet if missing), calls `createAndPostOrder` for a **GTC limit buy** at that price and size. Tracks the order in `pendingTrades` so we don’t double-place for the same (period, token type).
-
-### What this bot does **not** do
-
-- No **selling** or closing positions.
-- No **market orders** (only limit buys at a fixed price).
-- No **stop-loss**, **take-profit**, or **hedging** logic in the main loop (config has fields for them but they are unused in this dual-limit-start flow).
-- No **re-discovery** of markets inside the loop (markets are discovered once at startup).
+- **Node.js** ≥ 18  
+- **npm** (or compatible) for install / scripts  
 
 ---
 
-## Running the Bot (All Users)
-
-### One-command run (recommended)
-
-This is the easiest way for normal users. It defaults to **simulation** (safe), creates `config.json` from `config.json.example` if missing, and makes live trading require an explicit confirmation.
+## Quick start
 
 ```bash
 npm install
-npm run bot
+cp config.json.example config.json
+# Edit config.json — see Configuration below
 ```
 
-Optional:
+### Run (tsx)
 
-```bash
-# Force simulation (safe)
-npm run bot:simulation
+| Script | Command |
+|--------|---------|
+| Simulation (no real orders) | `npm run simulation` |
+| Live CLOB | `npm run dev` |
+| Build | `npm run build` |
+| Live (compiled) | `npm run start:live` |
+| Strategy report from history | `npm run report` |
 
-# Force live (will ask you to type LIVE, unless you add --yes-live)
-npm run bot:live
+### CLI (`src/main.ts`)
 
-# Use a different config path
-npm run bot -- -c path/to/config.json
+```text
+npx tsx src/main.ts [--simulation | --no-simulation | --live]
+  [-c path/to/config.json]
+  [--threshold-config path/to/threshold.json]
 ```
 
-### Requirements
-
-- Node.js >= 18
-- `config.json`: **live trading** needs `polymarket.private_key` only (API key triple is optional — derived from the wallet if omitted). **Simulation** needs no `private_key`.
-
-### Setup
-
-```bash
-npm install
-cp config.json.example config.json   # or copy from Rust project
-# Set polymarket.private_key (hex, with or without 0x) for both simulation and live.
-# Optional: api_key, api_secret, api_passphrase — omit to derive CLOB API key from the wallet.
-```
-
-### Simulation (no real orders)
-
-Simulation runs the same logic as production but **never sends orders** to Polymarket. It logs each “would-be” order and keeps a running summary (order count, total notional).
-
-- **No `private_key` needed** for simulation: the bot can run with only `config.json` (or defaults) and will use read-only market data. CLOB auth is skipped if no key is set.
-- **Summary**: After each market start where orders would be placed, the bot logs:  
-  `Simulation summary (this run): N order(s), total notional $X.XX`
-- **History**: Each summary is appended to `history/YYYY-MM-DD.json` (one JSON object per line, by date). The `history/` folder is created automatically and is in `.gitignore`.
-
-```bash
-npm run simulation
-```
-
-### Real trading (production)
-
-Requires `config.json` with `polymarket.private_key`. CLOB API credentials are **optional** (derived from the wallet when omitted). Places real limit orders on Polymarket.
-
-```bash
-npm run dev
-# or after build:
-npm run build && npm run start:live
-```
-
-### Config path
-
-```bash
-npx tsx src/main-dual-limit-045.ts -c /path/to/config.json
-```
-
-### Config
-
-Same shape as the Rust bot:
-
-- `polymarket.gamma_api_url`, `polymarket.clob_api_url` – API base URLs
-- `polymarket.private_key` – EOA private key (hex); **required for simulation and live**
-- `polymarket.api_key`, `api_secret`, `api_passphrase` – **optional**; if omitted, CLOB API keys are derived from `private_key`
-- `polymarket.proxy_wallet_address` – optional proxy/Magic wallet
-- `trading.dual_limit_price` – limit price (default 0.45)
-- `trading.dual_limit_shares` – optional fixed shares per order
-- `trading.enable_eth_trading`, `enable_solana_trading`, `enable_xrp_trading` – enable extra markets
+- **Live** requires `polymarket.private_key` in `config.json`.  
+- **Simulation** can run without a key for read-only market data + simulated fills.
 
 ---
 
-## Strategy Test Results (Current Bot Logic)
+## Configuration
 
-The following result uses the current 15-minute entry logic (period-start dual limit approach).
+### 1. `config.json` (required)
 
-### Overall
+| Section | Purpose |
+|---------|---------|
+| **`polymarket`** | `gamma_api_url`, `clob_api_url`, optional `api_key` / `api_secret` / `api_passphrase`, `private_key` (live), optional `proxy_wallet_address`, `signature_type`. |
+| **`trading`** | Per-asset toggles: `enable_btc_trading`, `enable_eth_trading`, `enable_solana_trading`, `enable_xrp_trading`. |
 
-| Metric | Value |
-|------|------:|
-| mode | 15m |
-| markets | 1,082 |
-| trades | 1,082 |
-| up_trades | 533 |
-| down_trades | 549 |
-| directional_accuracy | 53.05% |
-| win_rate | 53.05% |
-| avg_cost_per_trade | 50.3771 |
-| total_cost | 54508.0000 |
-| avg_pnl_per_trade | +2.6728 |
-| total_pnl | +2892.0000 |
+If `trading` is omitted, defaults are **BTC on**, others **off**. If **all four** are `false`, the bot still runs **BTC only**.
 
-### Daily PnL (UTC)
+**Gamma slugs** (current period `T` = Unix start of 15m window):
 
-| Date | PnL | Trades | Win Rate |
-|------|----:|-------:|---------:|
-| 2026-03-06 | +116.0000 | 26 | 53.85% |
-| 2026-03-07 | +496.0000 | 96 | 56.25% |
-| 2026-03-08 | +38.0000 | 96 | 50.00% |
-| 2026-03-09 | +789.0000 | 96 | 59.38% |
-| 2026-03-10 | +217.0000 | 96 | 53.12% |
-| 2026-03-11 | +288.0000 | 96 | 53.12% |
-| 2026-03-12 | +274.0000 | 96 | 53.12% |
-| 2026-03-13 | -252.0000 | 96 | 46.88% |
-| 2026-03-14 | +68.0000 | 96 | 51.04% |
-| 2026-03-15 | +155.0000 | 96 | 52.08% |
-| 2026-03-16 | +278.0000 | 96 | 53.12% |
-| 2026-03-17 | +425.0000 | 96 | 55.21% |
+| Toggle | Slug pattern |
+|--------|----------------|
+| BTC | `btc-updown-15m-{T}` |
+| ETH | `eth-updown-15m-{T}` |
+| SOL | `sol-updown-15m-{T}` |
+| XRP | `xrp-updown-15m-{T}` |
 
-> Notes:
-> - These are strategy test/analysis results based on the current strategy logic, not a guarantee of future performance.
-> - Live performance can differ due to fill quality, latency, fees, liquidity, and market regime changes.
+Copy from **`config.json.example`** and adjust.
 
-### Generate this report from current bot data
+### 2. Threshold strategy JSON (optional)
 
-After running simulation/live and collecting order history in `history/`, generate the same style report:
+Override defaults via **`--threshold-config`** or merge a file like **`threshold-strategy.config.example.json`**:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `buyPrice` | `0.45` | Buy trigger (upward cross of mid). |
+| `takeProfitPrice` | `0.65` | Exit limit when mid ≥ this. |
+| `stopLossPrice` | `0.30` | Exit limit when mid ≤ this. |
+| `minRemainingSeconds` | `300` | Block new buys if remaining period time ≤ this. |
+| `sharesPerOrder` | `5` | Size per buy. |
+| `checkIntervalMs` | `1000` | Poll interval for the main loop. |
+| `latePhaseEnabled` | `true` | Turn late-window 0.85→0.95 leg on/off. |
+| `latePhaseWindowSeconds` | `300` | Apply late logic when remaining period time ≤ this (seconds). |
+| `latePhaseBuyPrice` | `0.85` | GTC buy limit; entry on upward cross of this mid level. |
+| `latePhaseSellPrice` | `0.95` | GTC sell when mid ≥ this (`late_take_profit`; `late_phase` only). |
+| `latePhaseStopLossPrice` | `0.55` | GTC sell when mid ≤ this (`late_stop_loss`; `late_phase` only). |
+| `latePhaseSharesPerOrder` | `null` | If `null`, uses `sharesPerOrder`. |
+
+History rows include `entryKind`: `standard` vs `late_phase`. Close reasons include `late_take_profit` and `late_stop_loss`.
+
+---
+
+## Trade history & reports
+
+### Files
+
+- Directory: **`history/`** (in `.gitignore`).
+- One file per UTC calendar day of **close**: `YYYY-MM-DD.jsonl`.
+- Each line is a JSON object; main kinds: **`trade_close`**, **`session`**.
+
+### Strategy report
 
 ```bash
-npm run report:test
+npm run report
+npx tsx src/strategy-test-report.ts --history-dir ./history --scale 100
 ```
 
-Optional:
+| Flag | Description |
+|------|-------------|
+| `--history-dir` | Folder with `*.jsonl` (default `./history`). |
+| `--scale` | Multiply cost/PnL in the printed summary (default **100**); stored rows stay raw. |
+| `--markets-as-trades` | Set printed `markets` count = number of trades (style-only). |
 
-```bash
-# custom history directory
-npm run report:test -- --history-dir ./history
-
-# custom config (for gamma/clob API URLs)
-npm run report:test -- -c ./config.json
-```
+**win_rate** and **directional_accuracy** in the report both use **% of trades with positive PnL** (true settlement direction is not stored).
 
 ---
 
 ## Project layout
 
-- `src/config.ts` – load config, parse CLI args (`--simulation` / `--no-simulation`, `-c` config path)
-- `src/logger.ts` – re-exports `jonas-prettier-logger`; all app logging uses `logger.info()`, `logger.warn()`, `logger.error()`, `logger.trace()`
-- `src/types.ts` – Market, Token, BuyOpportunity, MarketSnapshot
-- `src/api.ts` – Gamma API (market by slug), CLOB order book
-- `src/clob.ts` – CLOB client (ethers + @polymarket/clob-client), place limit order
-- `src/monitor.ts` – fetch snapshot (prices, time remaining)
-- `src/trader.ts` – hasActivePosition, executeLimitBuy, simulation tracking and `getSimulationSummary()`
-- `src/simulation-history.ts` – save simulation results to `history/YYYY-MM-DD.json` (NDJSON by date)
-- `src/main-dual-limit-045.ts` – discover markets, monitor loop, place limit orders at period start; logs and saves simulation summary when in simulation mode
+```text
+src/
+  main.ts                 # Entry: multi-asset loop, quotes, PnL, history wiring
+  config.ts               # loadConfig()
+  api.ts                  # Gamma + CLOB HTTP (books, markets)
+  clob.ts                 # Wallet, ClobClient, limit orders
+  logger.ts
+  period.ts               # 15m period timestamp helper
+  trading-assets.ts       # Asset keys, slug prefixes, trading toggles defaults
+  trading-history.ts      # TradeHistoryWriter → history/*.jsonl
+  strategy-test-report.ts # npm run report
+  types.ts                # Shared DTOs
+  strategy/threshold/
+    threshold-strategy.ts # Core logic
+    position-manager.ts
+    threshold-executor.ts # Simulation vs live orders
+    config.ts             # ThresholdStrategyConfig defaults
+    pricing.ts
+    period-pnl.ts         # Period-end PnL banner helpers
+    types.ts
+    index.ts
+config.json.example
+threshold-strategy.config.example.json
+```
 
+---
+
+## Build output
+
+`npm run build` emits **ESM** to **`dist/`** (see `tsconfig.json`). Run compiled bot with `npm start` / `npm run start:live`.
+
+---
+
+## Developer guide
+
+This section is for **contributors** and anyone who wants to change behavior safely. It mirrors the depth of a hand-maintained internal runbook.
+
+### Mental model
+
+1. **One global 15m clock** — `period.ts` aligns all assets to the same `periodTimestamp` (floor of Unix time / 900 × 900).
+2. **One market instance per (asset, period)** — Gamma slug `{prefix}-{period}`; token IDs change when the period rolls.
+3. **Strategy state is per asset** — Cross detection (`lastUpMid`, `lastDownMid`, `lastPeriod`) must not be shared across BTC vs ETH, hence **one `ThresholdStrategy` + `PositionManager` per runner** in `main.ts`.
+4. **Execution is shared** — A single `SimulationThresholdExecutor` or `LiveThresholdExecutor` (one `ClobClient`) places all orders; positions still carry the correct `tokenId` per market.
+5. **Two entry lanes** — `entryKind: standard` uses the 0.45/0.65/0.15 rules; `late_phase` uses 0.85 entry, 0.95 TP, 0.55 SL (standard rules do not apply to late positions).
+6. **One position per side** — `getOpenForSide(UP|DOWN)` blocks another buy on that side until flat (standard and late share the same gate).
+7. **History is append-only** — `TradeHistoryWriter` serializes writes on a promise chain so concurrent `close()` calls do not interleave lines.
+
+### Architecture (high level)
+
+```mermaid
+flowchart TB
+  subgraph Entry["Entry"]
+    M[main.ts]
+  end
+  subgraph Config["Config"]
+    C[config.json]
+    T[threshold JSON]
+    LC[loadConfig / mergeThresholdConfig]
+  end
+  subgraph Data["Read-only data"]
+    API[PolymarketApi]
+    Gamma[Gamma: slug → market]
+    Book[CLOB: book → bid/ask]
+  end
+  subgraph Exec["Execution"]
+    EX[IThresholdExecutor]
+    SIM[SimulationThresholdExecutor]
+    LIVE[LiveThresholdExecutor + ClobClient]
+  end
+  subgraph Strategy["Per-asset strategy"]
+    TH[ThresholdStrategy]
+    PM[PositionManager]
+  end
+  subgraph Sidecar["Sidecar"]
+    HIST[TradeHistoryWriter]
+    PNL[period-pnl + console banners]
+  end
+  M --> LC
+  LC --> M
+  M --> API
+  API --> Gamma
+  API --> Book
+  M --> TH
+  TH --> PM
+  TH --> EX
+  EX --> SIM
+  EX --> LIVE
+  PM -->|setOnClosed| HIST
+  M --> PNL
+```
+
+### Main loop (runtime flow)
+
+```mermaid
+flowchart TD
+  A[Wake: checkIntervalMs] --> B[currentPeriodTimestamp + timeRemaining]
+  B --> C{For each enabled asset}
+  C --> D[Discover slug if new period / cache miss]
+  D --> E[Fetch UP + DOWN books]
+  E --> F[Build TickContext: slug, assetKey, conditionId, mids]
+  F --> G[Log QUOTE line]
+  G --> H[thresholdStrategy.onTick]
+  H --> I{Period changed?}
+  I -->|yes| J[onMarketStart: rollover sells + reset crosses]
+  I -->|no| K[checkExits TP/SL]
+  J --> K
+  K --> L{Time gate OK?}
+  L -->|yes| M[tryBuyOnCross UP + DOWN]
+  L -->|no| N[Log skipped buy if cross would fire]
+  M --> O{Global period changed vs last successful tick?}
+  N --> O
+  O -->|yes| P[MARKET END PnL per asset + pruneClosed]
+  O -->|no| Q[Sleep]
+  P --> Q
+  Q --> A
+```
+
+### `ThresholdStrategy.onTick` (order of operations)
+
+Exact order matters when debugging “why did it buy/sell here?”:
+
+| Step | What runs | Notes |
+|------|-----------|--------|
+| 1 | Compute `upMid` / `downMid` from `TokenPrice` | `midFromTokenPrice` needs both bid and ask. |
+| 2 | **Period change** → `onMarketStart` | Closes **all open** positions for this manager (rollover), resets `lastPeriod`, standard + **late** cross baselines. |
+| 3 | `checkExitsForOpenPositions` | **`late_phase`**: TP when mid ≥ `latePhaseSellPrice`; SL when mid ≤ `latePhaseStopLossPrice`. **`standard`**: TP/SL vs config. |
+| 4 | If `timeRemainingSeconds > minRemainingSeconds` | Standard `tryBuyOnCross` (0.45 leg) for UP/DOWN; else log skipped standard buy if cross would have fired. |
+| 5 | If `latePhaseEnabled` and `timeRemaining ≤ latePhaseWindowSeconds` | `tryLateBuyOnCross` (0.85 leg) using `lateLastUpMid` / `lateLastDownMid`. |
+| 6 | Update `lastUpMid` / `lastDownMid` | End of tick — standard cross memory. |
+| 7 | Update or clear `lateLastUpMid` / `lateLastDownMid` | Set mids when inside late window; **null** outside so the next entry seeds cleanly. |
+
+### Module reference (for developers)
+
+| Module | Responsibility | Depends on |
+|--------|----------------|------------|
+| `main.ts` | Orchestration: discovery, tick per asset, PnL banners, history hooks | config, api, clob, strategy, history |
+| `config.ts` | Merge `config.json`; normalize empty strings → `null` for credentials | `trading-assets` defaults |
+| `trading-assets.ts` | `TradingAssetKey`, slug prefixes, `enabledAssetKeys()` | — |
+| `api.ts` | Gamma slug → market; CLOB REST books / market by condition | `axios`, `types` |
+| `clob.ts` | `createClobClient`, `placeLimitOrder` (GTC, tick size) | `@polymarket/clob-client`, `ethers` |
+| `period.ts` | `PERIOD_SEC`, `currentPeriodTimestamp()` | — |
+| `trading-history.ts` | `TradeHistoryWriter`, JSONL rows | `Position` shape |
+| `strategy-test-report.ts` | Read `*.jsonl`, aggregate stats | `trading-history` kinds |
+| `threshold-strategy.ts` | Core rules: cross, TP/SL, time gate | `pricing`, `position-manager`, executor |
+| `position-manager.ts` | Map of positions; `setOnClosed` hook | `types` |
+| `threshold-executor.ts` | `IThresholdExecutor` impls | `clob.placeLimitOrder` |
+| `pricing.ts` | Mid + `crossedAbove` | — |
+| `period-pnl.ts` | `buildPeriodPnlSummary`, `formatPeriodPnlBanner` | closed `Position[]` |
+
+### TypeScript & ESM conventions
+
+- **`"type": "module"`** in `package.json`; **`module` / `moduleResolution`: `NodeNext`** in `tsconfig.json`.
+- **Imports use `.js` extensions** in source (e.g. `./config.js`) — required for Node ESM resolution; `tsc` maps them to emitted `.js` files under `dist/`.
+- **`strict: true`** — prefer explicit types on public APIs (`TickContext`, `ThresholdStrategyConfig`, history rows).
+- **Run without build** — `tsx src/main.ts` is the fastest iteration loop; use `npx tsc --noEmit` before committing.
+
+### Local developer workflow
+
+```bash
+# Install once
+npm install
+
+# Typecheck (no emit) — run often
+npx tsc --noEmit
+
+# Fast iteration: simulation + optional threshold overrides
+npx tsx src/main.ts --simulation --threshold-config ./threshold-strategy.config.example.json
+
+# Inspect history as it grows (PowerShell / bash)
+Get-Content history/2026-03-21.jsonl   # Windows
+tail -f history/$(date -u +%F).jsonl    # Unix (UTC date)
+
+# Aggregate report (tweak scale / dir)
+npm run report -- --history-dir ./history --scale 100
+```
+
+**Tips**
+
+- Lower `checkIntervalMs` in threshold config only when you need snappier logs; it increases Gamma/CLOB load × number of enabled assets.
+- Use **one asset** while developing strategy changes to reduce noise (`trading` toggles in `config.json`).
+
+### Extending the codebase
+
+| Goal | Where to change |
+|------|------------------|
+| Add a new crypto 15m market | `trading-assets.ts`: new `TradingAssetKey`, slug prefix, toggle in `TradingToggles` + `enabledAssetKeys` + `config.ts` merge + `config.json.example`. |
+| Change entry/exit rules | `threshold-strategy.ts`, `pricing.ts`; expose new fields in `strategy/threshold/config.ts` + JSON example. |
+| Different order type / sizing | `threshold-executor.ts` + `clob.ts` (`placeLimitOrder` params). |
+| Extra audit fields | `trading-history.ts` row shape + `strategy-test-report.ts` if aggregated. |
+| Custom logging sink | Replace or wrap `logger` (`src/logger.js`) or pass a custom `StrategyLogger` into `ThresholdStrategy` (would require a small `main.ts` refactor). |
+
+### Debugging & troubleshooting
+
+| Symptom | Things to check |
+|---------|------------------|
+| `No active market for prefix …` | Slug typo vs Polymarket; period alignment; market not yet listed / already closed. |
+| No mid in QUOTE (`—`) | Empty or missing book side; CLOB 404 for stale `token_id` after rollover. |
+| Buys never fire | `crossedAbove` needs **previous** mid; first tick after `onMarketStart` seeds baseline — need an actual cross through `buyPrice`. |
+| `private_key required` in live | `config.json` → `polymarket.private_key`; API key triple optional (derived in `clob.ts`). |
+| History file missing | `history/` created on first write; ensure process cwd is project root; check disk permissions. |
+| Report shows 0 trades | Wrong `--history-dir`; files must be `*.jsonl`; lines must be `kind: "trade_close"`. |
+
+### Verification checklist
+
+Before opening a PR or running live money:
+
+- [ ] `npx tsc --noEmit` passes  
+- [ ] `npm run simulation` runs without unhandled errors for several minutes  
+- [ ] `npm run report` reflects expected rows after simulated closes  
+- [ ] Live: confirm wallet / allowance / Polymarket account outside this repo’s scope  
+
+---
+
+## Disclaimer
+
+This software is for **educational / research** use. Trading involves risk. You are responsible for keys, compliance, and any losses. Not financial advice.
