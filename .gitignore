@@ -1,32 +1,5 @@
-# Dependencies
 node_modules/
-frontend/node_modules/
-
-# Build outputs
 dist/
-frontend/.next/
-frontend/out/
-
-# Logs
 *.log
-copy-trading.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Env / secrets
 .env
-frontend/.env
-.env.local
-.env.*.local
-
-# OS / editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# TypeScript
-*.tsbuildinfo
-
+config.json

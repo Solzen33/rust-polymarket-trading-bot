@@ -1,390 +1,309 @@
-# Polymarket Sports Copy Trading Bot (TypeScript) — Top Traders, Automation, Dashboard
+# Polymarket Trading Bot (TypeScript)
 
-Polymarket **sports copy-trading bot** + **Next.js dashboard** for tracking **top sports traders**, selecting traders/markets, and running an automated copy-trading process in **simulation** or **live** mode. Includes an Express API server for Polymarket data (sports, markets, trader history) and real-time-ish bot logs.
+Polymarket trading bot (TypeScript) for 15-minute Up/Down crypto markets. Focuses on **reducing loss** for small and mid-size traders—not whale capital. At each new 15-minute period start, places limit buys for BTC and optionally ETH, Solana, XRP at a fixed price (default $0.45). Run in simulation or live on Polymarket CLOB.
+---
 
-## Screenshots (dashboard)
+## Background & Strategy Evolution
 
-> If any image doesn’t load, make sure the Google Drive file is set to “Anyone with the link can view”.
+I built a bunch of Polymarket bots over time. At first I tried **arbitrage**. It was safe and the logic was clear, but the edge was small and the profits were tiny. After running it for a while I realized it wasn't really worth the effort for the returns I was getting. So I switched to strategies that aimed for **bigger profit**. When they hit, the gains were nice. But when they didn't, the drawdowns were big. For someone without whale-sized capital, one bad run can wipe out a lot of earlier work. I had to accept that chasing big profit with small size usually means you get big loss on the other side too.
 
-### Sports list
-![Sports list](https://lh3.googleusercontent.com/d/14f6jCTz7Tf3Ko_80xWtw_pgbeaNTHV5r)
+I thought about it for a long time. If you're not a whale, you can't rely on volume to smooth out variance. The only thing that really helps is **reducing loss** — keeping each period's risk and cost under control so that a few bad outcomes don't blow up the account. So I focused on that. I studied the markets, ran a lot of tests and simulations, and ended up with the approach in this repo: **dual limit at period start**. You buy both Up and Down at a fixed price (e.g. $0.45) only in the first ~2 seconds of each new 15m period. No fancy entries, no chasing. Just cap the cost per period and stick to the plan. that’s a bad trade.
 
-### Sports list (more)
-![Sports list more](https://lh3.googleusercontent.com/d/10weQlogidax_Wk7RmWx4G3dSGoceJgyJ)
 
-### Top traders (SPORTS leaderboard)
-![Top traders](https://lh3.googleusercontent.com/d/1o_i7hwhTk6gsEEEZ9aIxRlQFfxOQFcN3)
+---
 
-### Copy trading (select traders)
-![Copy trading - select traders](https://lh3.googleusercontent.com/d/1mVvm8L88RRDxcVK8-bEZwmgIHvkCQzYW)
+## Contact
 
-### Copy trading (select live slugs)
-![Copy trading - select live slugs](https://lh3.googleusercontent.com/d/1IgOWNwWaSmCwRRw-WpZSSKVuB6P-QbHA)
+- **Telegram:** [https://t.me/solzen77](https://t.me/solzen77)
 
-### Copy trading (bot control + logs)
-![Copy trading - bot control and logs](https://lh3.googleusercontent.com/d/1ovVLCddqD3AHsfhPQUgIuife6sTuVBxT)
+---
 
-### Market detail (chart + outcomes)
-![Market detail](https://lh3.googleusercontent.com/d/100CNLrpENVbQ8LsLKBRNtUu_Bh1yM7XT)
+## Strategy Overview (Diagrams)
 
-### Trader detail (PnL chart + table)
-![Trader detail](https://lh3.googleusercontent.com/d/1E1X6nbIBw6T4BVtplRQmKMcYuSdcWQVq)
+### Philosophy: From “Big Profit” to “Reduce Loss First”
 
-### Copy trading (full page)
-![Copy trading full page](https://lh3.googleusercontent.com/d/19gbnMDiFaaccTNY6DNIhqd1ovAJ0W5qz)
+```mermaid
+flowchart LR
+  A[Arbitrage] -->|"Low profit"| B[High-risk / Big profit]
+  B -->|"Big loss too"| C[Reduce loss first]
+  C --> D[Current strategy: dual limit at period start]
+  style C fill:#e8f5e9
+  style D fill:#c8e6c9
+```
 
-## What this bot does (plain English)
+### When the Bot Places Orders (Decision Flow)
 
-If you’re not technical, here’s the simple idea:
+```mermaid
+flowchart TD
+  Start([Every check_interval e.g. 1s]) --> Snapshot[Fetch order books + time remaining]
+  Snapshot --> T1{Time remaining > 0?}
+  T1 -->|No| Wait[Wait next tick]
+  T1 -->|Yes| T2{Period already seen?}
+  T2 -->|No| Wait
+  T2 -->|Yes| T3{First ~2s of period?}
+  T3 -->|No| Wait
+  T3 -->|Yes| T4{Not already placed this period?}
+  T4 -->|No| Wait
+  T4 -->|Yes| Place[Place limit buys: Up + Down at fixed price]
+  Place --> Wait
+  Wait --> Start
+```
 
-- **You choose “who to follow”**: pick one or more top Polymarket sports traders (wallets).
-- **You choose “where to trade”**: pick one or more sports market slugs (the markets you care about).
-- The bot then **watches those traders’ recent trades** and, when it sees a new BUY/SELL on your selected markets, it **copies the action**:
-  - **Simulation mode**: it only logs what it *would* do (no real orders).
-  - **Live mode**: it places real orders on Polymarket via the CLOB (requires credentials).
+### End-to-End Data Flow
 
-This repository also includes a **dashboard** where you can browse sports/markets, view traders, start/stop the bot, and read the bot logs in a user-friendly way.
+```mermaid
+flowchart TB
+  subgraph Init[Startup]
+    Config[Config + CLI]
+    Auth[Auth optional: wallet + CLOB]
+    Discover[Discover markets via Gamma API]
+    Config --> Auth --> Discover
+  end
 
-## How the copy-trading logic works (step-by-step)
+  subgraph Loop[Main loop]
+    CLOB[CLOB order books]
+    Snapshot[Snapshot: prices, time_remaining]
+    Condition{First 2s of period & not placed?}
+    Opportunities[Build opportunities: Up/Down per asset]
+    Execute[Place limit buy or simulate]
+    CLOB --> Snapshot --> Condition
+    Condition -->|Yes| Opportunities --> Execute
+    Condition -->|No| CLOB
+  end
 
-1. **Load configuration**
-   - The backend loads settings from `.env` (preferred) or `config.json` (fallback).
-   - You provide: followed traders, selected market slugs, and mode (simulation/live).
+  Discover --> Loop
+```
 
-2. **Resolve market slugs**
-   - A “slug” is the market identifier in the URL.
-   - The bot converts each slug into a market/condition id so it can filter trades correctly.
+---
 
-3. **Poll trader activity**
-   - On a fixed interval (for example every 3 seconds), the bot queries Polymarket’s Data API for each followed trader’s recent trades.
-   - It filters down to trades that match your selected markets.
+## Bot Logic (Detailed)
 
-4. **Deduplicate**
-   - The bot keeps an in-memory set of “already seen” trades (a unique key per trade) so it does not copy the same action twice.
+### Strategy in one sentence
 
-5. **Copy the action**
-   - When a new trade is detected, it decides whether it’s a BUY or SELL and then:
-     - **Simulation**: write a clear log line.
-     - **Live**: submit a market order through the Polymarket CLOB client.
+Every time a **new 15-minute market period starts**, the bot places **limit BUY** orders for **Up** and **Down** tokens of the selected assets (BTC always; ETH/SOL/XRP if enabled) at a **fixed limit price** (e.g. $0.45). No market orders; no selling in this bot.
 
-6. **Logging + monitoring**
-   - Every important event is written to a log file and displayed in the dashboard.
-   - The API server exposes endpoints to view status and tail the latest logs.
+### Markets targeted
 
-### Important note about latency (why copy-trading exists)
-On Polymarket, “top trader” activity can move fast. If you try to manually follow trades, you’ll often be late. This bot exists to reduce that delay by **automating the detection + execution loop**. It can’t guarantee you match the exact same fill price as the top trader, but it helps you react much faster than manual trading.
+- **Polymarket 15-minute Up/Down markets**: e.g. “Will BTC go up or down in the next 15 minutes?” Each period has two outcome tokens: **Up** (yes) and **Down** (no). The bot buys both at a fixed price at the start of the period.
+- **Period**: 900 seconds (15 min). Period boundaries are aligned to Unix time: `period_timestamp = floor(now / 900) * 900`.
 
-## Development story (why this repo exists)
+### Startup sequence
 
-This project was built by a developer with **strong experience building sports trading bots**.
+1. **Config & CLI**  
+   Loads `config.json` and parses `--simulation` / `--no-simulation` and `-c <path>`. Simulation = no real orders; production = real CLOB orders.
 
-- **Phase 1 — manual trading**
-  - The first version focused on manual trading tools to learn how Polymarket markets/tokens behave in real time.
-  - This phase helped validate market selection, token/outcome mapping, and order mechanics.
+2. **Auth (if `private_key` set)**  
+   Builds an ethers wallet and CLOB client, optionally derives or creates API key. If auth fails and mode is simulation, the bot continues with read-only market data.
 
-- **Phase 2 — studying top traders**
-  - After observing the sports leaderboard and traders’ closed positions and trade patterns, it became clear that top traders often act with low latency.
+3. **Market discovery**  
+   For each asset (BTC, and ETH/SOL/XRP if enabled), finds the **current** 15-min market by slug pattern:
+   - `{asset}-updown-15m-{period_timestamp}` (e.g. `btc-updown-15m-1739462400`).
+   - For BTC/ETH, also tries **previous** periods (up to 3 × 15 min back) if the current one isn’t found.
+   - Uses Polymarket **Gamma API** (event/market by slug) and ensures the market is active and not closed. Stores condition IDs and token IDs for Up/Down.
 
-- **Phase 3 — building a sports top-trader copy trading bot**
-  - Manual following couldn’t keep up (“I can’t follow top trader’s latency”).
-  - The solution was an automated copy-trading loop: poll trades, detect new actions, dedupe, and (optionally) place real orders.
+4. **Main loop**  
+   Runs forever, every `check_interval_ms` (default 1 s):
+   - Fetches a **snapshot**: order book (best bid/ask) for each market’s Up and Down tokens via CLOB, plus **time remaining** in the current period (`end_time - now`).
+   - Logs a price line: e.g. `BTC: U$0.48/$0.52 D$0.45/$0.49 | ETH: ... | ⏱️ 14m 32s`.
 
-## Requirements
+### When does the bot place orders?
 
-- Node.js 18+
-- Polymarket API credentials (API key, secret, passphrase) and a private key (or proxy wallet)
+Orders are placed **only when all** of the following are true:
 
-## Quickstart (non‑technical, 10 minutes)
+1. **Time remaining > 0** (market not yet ended).
+2. **Period has been seen** (so we know we’re in a valid period).
+3. **"Just after" period start**: `time_elapsed = 900 - time_remaining` is **≤ 2 seconds**. So we act in the first ~2 seconds of the new period only.
+4. **Not already placed this period**: `lastPlacedPeriod !== current period`. So we place **once per period**, right after it starts.
+5. **There are opportunities**: at least one Up or Down token is available for the enabled markets (BTC + any of ETH/SOL/XRP that are enabled).
 
-This is the easiest way to use the copy‑trading bot with the dashboard.
+If any of these fail, the loop just waits and repeats.
 
-### Step 1) Install (one time)
+### Buy point (when we buy)
 
-In the repo root:
+| What | Value |
+|------|--------|
+| **When** | First **0–2 seconds** after a new 15-minute period starts |
+| **Clock** | `time_remaining_seconds` between **898 and 900** (so `time_elapsed = 900 - time_remaining` is 0–2) |
+| **How often** | **Once per period** (then `lastPlacedPeriod` blocks until the next period) |
+| **Price** | Fixed limit: `trading.dual_limit_price` (e.g. **$0.45**) |
+| **Tokens** | One limit buy for **Up**, one for **Down**, for each enabled asset (e.g. BTC only if others disabled) |
+
+So the **buy point** is: as soon as the new 15-min window starts (first 2 seconds), the bot places all limit buys at the configured price, then does nothing else until the next period.
+
+### What gets traded (opportunities)
+
+- **BTC**: always — BTC Up and BTC Down (if the market has both tokens).
+- **ETH / Solana / XRP**: only if `enable_eth_trading` / `enable_solana_trading` / `enable_xrp_trading` are `true` in config.
+
+For each such token, the bot creates a **buy opportunity** (limit price from config, token ID, condition ID, period). It then tries to place a **limit buy** for each opportunity, **skipping** any (period, token type) for which it already has an active position in this run (to avoid duplicate orders in the same period).
+
+### Order execution (Trader)
+
+- **Limit price**: from `trading.dual_limit_price` (e.g. 0.45).
+- **Size (shares)**:
+  - If `trading.dual_limit_shares` is set → use that as the number of shares per order.
+  - Else → `fixed_trade_amount / bid_price` (e.g. $4.5 / 0.45 ≈ 10 shares).
+- **Simulation**: logs the order and records it in memory and in `history/YYYY-MM-DD.json`; no CLOB call.
+- **Production**: builds a CLOB client (with wallet + API creds), calls `createAndPostOrder` for a **GTC limit buy** at that price and size. Tracks the order in `pendingTrades` so we don’t double-place for the same (period, token type).
+
+### What this bot does **not** do
+
+- No **selling** or closing positions.
+- No **market orders** (only limit buys at a fixed price).
+- No **stop-loss**, **take-profit**, or **hedging** logic in the main loop (config has fields for them but they are unused in this dual-limit-start flow).
+- No **re-discovery** of markets inside the loop (markets are discovered once at startup).
+
+---
+
+## Running the Bot (All Users)
+
+### One-command run (recommended)
+
+This is the easiest way for normal users. It defaults to **simulation** (safe), creates `config.json` from `config.json.example` if missing, and makes live trading require an explicit confirmation.
 
 ```bash
 npm install
-cp .env.example .env
+npm run bot
 ```
 
-### Step 2) Configure `.env`
-
-Open `.env` and set at least:
-
-- **Simulation mode (safe, recommended first)**:
-  - `COPY_TRADING_SLUGS` = comma‑separated market slugs
-  - `COPY_TRADING_TRADERS` = comma‑separated trader wallets (0x...)
-  - (Optional) `COPY_TRADING_AMOUNT_USD` (default 5)
-- **Live mode (real trading)** also requires Polymarket credentials:
-  - `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`, `POLYMARKET_PRIVATE_KEY`
-
-Tip: You can find **slugs** by opening a market on Polymarket and copying the last part of the URL.
-
-### Step 3) Start the backend API (Terminal 1)
+Optional:
 
 ```bash
-npm run api
+# Force simulation (safe)
+npm run bot:simulation
+
+# Force live (will ask you to type LIVE, unless you add --yes-live)
+npm run bot:live
+
+# Use a different config path
+npm run bot -- -c path/to/config.json
 ```
 
-You should see it listening on `http://localhost:4004`.
+### Requirements
 
-### Step 4) Start the dashboard (Terminal 2)
+- Node.js >= 18
+- `config.json` with Polymarket `private_key` (and optional API creds) for real trading; **optional** for simulation
 
-```bash
-cd frontend
-npm install
-cp .env.example .env
-npm run dev
-```
-
-Open `http://localhost:3000`.
-
-### Step 5) Run copy‑trading
-
-You have two options:
-
-- **Option A (recommended): use the dashboard**
-  - Go to the copy‑trading page, select traders + slugs, choose **Simulation** or **Real**, then press **Start**.
-  - Watch the log panel to confirm it’s running.
-- **Option B: run in the terminal**
-
-```bash
-# Simulation by default:
-npm run copy-trading
-
-# Live orders:
-npm run copy-trading:live
-```
-
-## Glossary (simple)
-
-- **Trader / wallet**: a Polymarket account address like `0x...` you want to follow.
-- **Slug**: the market identifier in the URL (example: `will-the-oklahoma-city-thunder-win-the-2026-nba-finals`).
-- **Simulation**: the bot logs actions but does not place real orders.
-- **Live / Real**: the bot can place real orders (needs credentials).
-
-## Setup
+### Setup
 
 ```bash
 npm install
-cp .env.example .env
-# Edit .env: set copy-trading vars (and for live trading: Polymarket credentials).
+cp config.json.example config.json   # or copy from Rust project
+# Edit config.json: set polymarket.private_key (hex, with or without 0x) for real trading
 ```
 
-## Configuration
+### Simulation (no real orders)
 
-The backend now prefers **environment variables** from `.env`. See `.env.example` for the full list.
+Simulation runs the same logic as production but **never sends orders** to Polymarket. It logs each “would-be” order and keeps a running summary (order count, total notional).
 
-Key env vars:
-
-| Env var | Description |
-|---|---|
-| `TRADING_SLUG` | Market slug (e.g. from Polymarket URL). Required to run the trailing bot. |
-| `TRADING_CONTINUOUS` | If true, after buying both sides, reset and trail again until market ends |
-| `TRADING_TRAILING_STOP_POINT` | Trigger when ask >= lowest + this (e.g. 0.03) |
-| `TRADING_TRAILING_SHARES` | Target shares per buy |
-| `TRADING_FIXED_TRADE_AMOUNT` | Fallback USD amount per trade |
-| `TRADING_MIN_TIME_REMAINING_SECONDS` | Do not open new trades when less than this many seconds remain (0 = trade until closure) |
-| `TRADING_CHECK_INTERVAL_MS` | Poll interval in ms |
-
-**Copy-trading** (for `npm run copy-trading`) env vars:
-
-- `COPY_TRADING_SLUGS`: comma-separated slugs
-- `COPY_TRADING_TRADERS`: comma-separated proxy wallets (0x...)
-- `COPY_TRADING_POLL_INTERVAL_MS` (default 3000)
-- `COPY_TRADING_AMOUNT_USD` (default 5)
-- `COPY_TRADING_SIMULATION` (default true)
-
-Polymarket credentials (required for LIVE trading via CLOB):
-
-- `POLYMARKET_API_KEY`
-- `POLYMARKET_API_SECRET`
-- `POLYMARKET_API_PASSPHRASE`
-- `POLYMARKET_PRIVATE_KEY`
-- Optional: `POLYMARKET_PROXY_WALLET_ADDRESS`, `POLYMARKET_SIGNATURE_TYPE` (0 = EOA, 1 = Proxy, 2 = GnosisSafe)
-
-Optional endpoint overrides:
-
-- `GAMMA_API_URL` (default `https://gamma-api.polymarket.com`)
-- `CLOB_API_URL` (default `https://clob.polymarket.com`)
-- `DATA_API_BASE` (default `https://data-api.polymarket.com` for the API server)
-
-### Optional: `config.json`
-If you don’t set env vars, the code falls back to `config.json` like before. (Env wins when present.)
-
-## Run
-
-**Simulation (default, no real orders):**
+- **No `private_key` needed** for simulation: the bot can run with only `config.json` (or defaults) and will use read-only market data. CLOB auth is skipped if no key is set.
+- **Summary**: After each market start where orders would be placed, the bot logs:  
+  `Simulation summary (this run): N order(s), total notional $X.XX`
+- **History**: Each summary is appended to `history/YYYY-MM-DD.json` (one JSON object per line, by date). The `history/` folder is created automatically and is in `.gitignore`.
 
 ```bash
-npm run dev
-# or
 npm run simulation
-# or
-npx tsx src/bin/sports-trailing.ts
 ```
 
-**Live trading:**
+### Real trading (production)
+
+Requires `config.json` with `polymarket.private_key` (and optionally API key/secret/passphrase). Places real limit orders on Polymarket.
 
 ```bash
-npm run live
-# or
-npm run dev -- --no-simulation
-```
-
-**Sports list only (no slugs):**
-
-```bash
-npm run sports-list
-```
-
-**Live slugs for a selected sport (run after sports-list to pick a sport):**
-
-```bash
-npm run live-slugs -- nba
-npm run live-slugs -- nfl
-npm run live-slugs -- 34
-```
-
-**List current live slugs for all sports (to copy into config):**
-
-```bash
-npm run list-slugs
-# Or only one sport, e.g. NBA:
-npm run dev -- --list-slugs=nba
-```
-
-**Top sports traders (daily rank, top 50 by PNL):**
-
-```bash
-npm run sports-top-traders
-# Optional:
-npm run sports-top-traders -- --orderBy=VOL
-npm run sports-top-traders -- --timePeriod=WEEK
-npm run sports-top-traders -- --limit=10
-```
-
-**Latest finished market history for a chosen top trader (last 7 days):**
-
-```bash
-# By rank (1–50 from sports-top-traders list):
-npm run trader-history -- 1
-# By proxy wallet:
-npm run trader-history -- 0x56687bf447db6ffa42ffe2204a05edaa20f55839
-# Optional: --days=7 (default), --timePeriod=DAY|WEEK|MONTH|ALL when using rank
-npm run trader-history -- 5 --timePeriod=WEEK --days=14
-```
-
-**Copy-trading bot (copy selected traders’ buy/sell on selected slugs):**
-
-Set `COPY_TRADING_SLUGS` (comma-separated market slugs) and `COPY_TRADING_TRADERS` (comma-separated proxy wallet addresses). Run:
-
-```bash
-npm run copy-trading
-# Simulation by default; for live orders:
-npm run copy-trading:live
-```
-
-While running: **start** / **stop** / **restart** (copy on/off), **buy &lt;token_id&gt; &lt;usd&gt;** / **sell &lt;token_id&gt; &lt;usd&gt;** (manual orders), **status**, **quit**.
-
-## Troubleshooting (common issues)
-
-- **Dashboard shows 404 for backend endpoints**
-  - Make sure the backend is running with `npm run api` and your frontend `.env` has `NEXT_PUBLIC_API_URL=http://localhost:4004`.
-
-- **“Live” mode doesn’t place orders**
-  - You must set Polymarket credentials in `.env` (`POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`, `POLYMARKET_PRIVATE_KEY`).
-  - Try simulation first to confirm slugs + traders are correct.
-
-- **Bot seems slow / misses trades**
-  - Copy‑trading is based on polling the Data API, so it cannot perfectly match top‑trader speed. Reduce `COPY_TRADING_POLL_INTERVAL_MS` if needed.
-
-
-**Manual trading bot (manual buy/sell from current market state):**
-
-```bash
-npm run manual-trading -- <slug>
-# Live:
-npm run manual-trading:live -- <slug>
-```
-
-In the prompt, use:
-- **refresh** to update bid/ask/mid
-- **buy <outcomeIndex|tokenId> <usd>**
-- **sell <outcomeIndex|tokenId> <usd>**
-- **quit**
-
-**Market state + chart data for a chosen live slug:**
-
-```bash
-npm run market-state -- <slug>
-
-# Example:
-npm run market-state -- will-the-oklahoma-city-thunder-win-the-2026-nba-finals
-```
-
-This prints:
-- Basic market info (question, conditionId, end_date_iso)
-- Current bid/ask/mid for each outcome token
-- CSV-style `tokenId,outcome,timestamp,price` series that you can import into a charting tool.
-
-**Custom config path:**
-
-```bash
-npm run dev -- --config ./my-config.json
-```
-
-**Backend API (for frontend / other clients):**
-
-```bash
-npm run api
-# Listens on http://localhost:4004 (override with PORT=4001 npm run api)
-```
-
-Endpoints (read-only, CORS enabled):
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/sports` | Sports list |
-| GET | `/api/sports/tree?livePerTag=5` | Sports grouped tree + live slugs per tag |
-| GET | `/api/sports/:tagId/live?limit=50` | Live markets for a sport tag |
-| GET | `/api/traders` | SPORTS leaderboard |
-| GET | `/api/traders/:wallet/history?days=7` | Closed positions for a trader |
-| GET | `/api/markets/:slug` | Market details by slug |
-| GET | `/api/tokens/:tokenId/history?interval=1h` | Price history for one token |
-| GET | `/api/health` | Health check |
-| GET | `/api/copy-trading/status` | Copy-trading process status |
-| GET | `/api/copy-trading/logs?limit=100` | Tail copy-trading log file |
-| POST | `/api/copy-trading/start` | Start copy-trading (body: `{ simulation, traders, slugs }`) |
-| POST | `/api/copy-trading/stop` | Stop copy-trading |
-
-The server uses `.env` when present (env wins), otherwise falls back to `config.json`, otherwise defaults to Polymarket production URLs.
-
-**Frontend (Next.js dashboard):**
-
-```bash
-cd frontend
-npm install
-cp .env.example .env
-# Optional: set NEXT_PUBLIC_API_URL=http://localhost:4004 to use the backend API
 npm run dev
+# or after build:
+npm run build && npm run start:live
 ```
 
-Open http://localhost:3000 for traders list, trader history charts, and market state by slug. With `NEXT_PUBLIC_API_URL` set, all data is loaded via the backend API above.
-
-## Build
+### Config path
 
 ```bash
-npm run build
-node dist/bin/sports-trailing.js
+npx tsx src/main-dual-limit-045.ts -c /path/to/config.json
 ```
 
-## Architecture
+### Config
 
-- **config** – Loads `.env` (preferred) or `config.json`, plus CLI args (`--simulation`, `--no-simulation`, `--config`)
-- **api** – `PolymarketApi`: Gamma (get market by slug), CLOB (get market details, get price). Order placement via `@polymarket/clob-client`
-- **api-data** – Read-only Data/Gamma/CLOB fetchers (leaderboard, closed positions, market by slug, price history). Used by **api-server** and reusable by CLIs.
-- **bin/api-server** – HTTP API server (Express). Serves `/api/sports`, `/api/traders`, `/api/traders/:wallet/history`, `/api/markets/:slug`, `/api/tokens/:tokenId/history`, plus `/api/copy-trading/*`. Uses `.env` when present (env wins) or `config.json` for API base URLs when present.
-- **trader** – `Trader.executeBuy()`: validates time remaining, computes size, then simulation (log + in-memory pending) or live (place market order via CLOB client)
-- **bin/sports-trailing** – Main loop: resolve market by slug, fetch both token prices every `check_interval_ms`, run trailing state machine (WaitingFirst → FirstBuyPending → FirstBought → second buy → Done or reset if continuous), exit when market end time is reached.
-- **frontend** – Next.js app (traders, trader history chart, market state chart). Uses backend API when `NEXT_PUBLIC_API_URL` is set, otherwise Polymarket public APIs.
+Same shape as the Rust bot:
+
+- `polymarket.gamma_api_url`, `polymarket.clob_api_url` – API base URLs
+- `polymarket.private_key` – EOA private key (hex); **optional for simulation** (leave empty to run without CLOB auth)
+- `polymarket.proxy_wallet_address` – optional proxy/Magic wallet
+- `trading.dual_limit_price` – limit price (default 0.45)
+- `trading.dual_limit_shares` – optional fixed shares per order
+- `trading.enable_eth_trading`, `enable_solana_trading`, `enable_xrp_trading` – enable extra markets
+
+---
+
+## Strategy Test Results (Current Bot Logic)
+
+The following result uses the current 15-minute entry logic (period-start dual limit approach).
+
+### Overall
+
+| Metric | Value |
+|------|------:|
+| mode | 15m |
+| markets | 1,082 |
+| trades | 1,082 |
+| up_trades | 533 |
+| down_trades | 549 |
+| directional_accuracy | 53.05% |
+| win_rate | 53.05% |
+| avg_cost_per_trade | 50.3771 |
+| total_cost | 54508.0000 |
+| avg_pnl_per_trade | +2.6728 |
+| total_pnl | +2892.0000 |
+
+### Daily PnL (UTC)
+
+| Date | PnL | Trades | Win Rate |
+|------|----:|-------:|---------:|
+| 2026-03-06 | +116.0000 | 26 | 53.85% |
+| 2026-03-07 | +496.0000 | 96 | 56.25% |
+| 2026-03-08 | +38.0000 | 96 | 50.00% |
+| 2026-03-09 | +789.0000 | 96 | 59.38% |
+| 2026-03-10 | +217.0000 | 96 | 53.12% |
+| 2026-03-11 | +288.0000 | 96 | 53.12% |
+| 2026-03-12 | +274.0000 | 96 | 53.12% |
+| 2026-03-13 | -252.0000 | 96 | 46.88% |
+| 2026-03-14 | +68.0000 | 96 | 51.04% |
+| 2026-03-15 | +155.0000 | 96 | 52.08% |
+| 2026-03-16 | +278.0000 | 96 | 53.12% |
+| 2026-03-17 | +425.0000 | 96 | 55.21% |
+
+> Notes:
+> - These are strategy test/analysis results based on the current strategy logic, not a guarantee of future performance.
+> - Live performance can differ due to fill quality, latency, fees, liquidity, and market regime changes.
+
+### Generate this report from current bot data
+
+After running simulation/live and collecting order history in `history/`, generate the same style report:
+
+```bash
+npm run report:test
+```
+
+Optional:
+
+```bash
+# custom history directory
+npm run report:test -- --history-dir ./history
+
+# custom config (for gamma/clob API URLs)
+npm run report:test -- -c ./config.json
+```
+
+---
+
+## Project layout
+
+- `src/config.ts` – load config, parse CLI args (`--simulation` / `--no-simulation`, `-c` config path)
+- `src/logger.ts` – re-exports `jonas-prettier-logger`; all app logging uses `logger.info()`, `logger.warn()`, `logger.error()`, `logger.trace()`
+- `src/types.ts` – Market, Token, BuyOpportunity, MarketSnapshot
+- `src/api.ts` – Gamma API (market by slug), CLOB order book
+- `src/clob.ts` – CLOB client (ethers + @polymarket/clob-client), place limit order
+- `src/monitor.ts` – fetch snapshot (prices, time remaining)
+- `src/trader.ts` – hasActivePosition, executeLimitBuy, simulation tracking and `getSimulationSummary()`
+- `src/simulation-history.ts` – save simulation results to `history/YYYY-MM-DD.json` (NDJSON by date)
+- `src/main-dual-limit-045.ts` – discover markets, monitor loop, place limit orders at period start; logs and saves simulation summary when in simulation mode
+
