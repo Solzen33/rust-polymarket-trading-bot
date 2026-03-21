@@ -1,7 +1,12 @@
 /**
- * Polymarket Dual Limit-Start Bot (TypeScript)
- * At each 15-minute market start, place limit buys for BTC/ETH/SOL/XRP Up and Down at a fixed price (e.g. $0.45).
- * Port of Polymarket-Trading-Bot-Rust main_dual_limit_045.
+ * @fileoverview Polymarket Dual Limit-Start Bot (TypeScript).
+ *
+ * At each new 15-minute period start (first ~2s), places limit BUYs for Up/Down on BTC and optional
+ * ETH/SOL/XRP at `trading.dual_limit_price` (e.g. $0.45). Port of Rust `main_dual_limit_045`.
+ *
+ * **CLI:** `--simulation` | `--no-simulation` (live), `-c` / `--config` path.
+ * **Auth:** `polymarket.private_key` required for both modes (CLOB `getOk`); simulation never sends orders.
+ * **Outputs:** logs, and simulation summaries via `simulation-history.ts` → `history/`.
  */
 import { loadConfig, parseArgs } from "./config.js";
 import { PolymarketApi } from "./api.js";
@@ -12,9 +17,12 @@ import { saveSimulationResult } from "./simulation-history.js";
 import logger from "./logger.js";
 import type { Market, MarketSnapshot, BuyOpportunity, TokenType } from "./types.js";
 
+/** Default limit price if `trading.dual_limit_price` is unset. */
 const LIMIT_PRICE = 0.45;
+/** 15 minutes in seconds (Polymarket crypto up/down period length). */
 const PERIOD_DURATION = 900;
 
+/** Placeholder market when discovery fails or asset is disabled — keeps snapshot shape valid. */
 function disabledMarket(conditionId: string, slug: string, question: string): Market {
   return {
     conditionId,
@@ -25,6 +33,9 @@ function disabledMarket(conditionId: string, slug: string, question: string): Ma
   };
 }
 
+/**
+ * Find active `{prefix}-updown-15m-{period}` market via Gamma; may walk back prior periods for BTC/ETH.
+ */
 async function discoverMarket(
   api: PolymarketApi,
   name: string,
@@ -66,6 +77,7 @@ async function discoverMarket(
   throw new Error(`Could not find active ${name} 15-minute up/down market (tried: ${slugPrefixes.join(", ")})`);
 }
 
+/** Discover ETH/BTC/SOL/XRP 15m markets according to `enable_*` flags. */
 async function getOrDiscoverMarkets(
   api: PolymarketApi,
   enableEth: boolean,
@@ -107,6 +119,7 @@ async function getOrDiscoverMarkets(
   return { eth, btc, solana, xrp };
 }
 
+/** Build one {@link BuyOpportunity} per Up/Down token for enabled assets at period start. */
 function buildOpportunities(
   snapshot: MarketSnapshot,
   limitPrice: number,

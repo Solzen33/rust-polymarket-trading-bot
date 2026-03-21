@@ -1,8 +1,13 @@
+/**
+ * @fileoverview Polymarket CLOB trading: wallet-backed `ClobClient`, optional API key triple,
+ * and `placeLimitOrder` (GTC) for live order placement from `trader.ts`.
+ */
+
 import { ethers } from "ethers";
 import { ClobClient, Side, OrderType, Chain } from "@polymarket/clob-client";
 import type { Config } from "./config.js";
 
-/** Create ethers Wallet from private key hex (with or without 0x) */
+/** Create ethers Wallet from private key hex (with or without `0x`). */
 export function createWallet(privateKey: string): ethers.Wallet {
   const key = privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`;
   return new ethers.Wallet(key);

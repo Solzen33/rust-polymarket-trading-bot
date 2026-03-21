@@ -1,9 +1,16 @@
+/**
+ * @fileoverview Read-only Polymarket data access: Gamma (markets by slug) and public CLOB HTTP endpoints
+ * (market by condition id, order book). No signing; used for discovery and price snapshots.
+ */
+
 import axios, { AxiosInstance } from "axios";
 import { Market, Token } from "./types.js";
 import type { Config } from "./config.js";
 
+/** Polygon chain id (reserved for future CLOB helpers; order placement uses `clob.ts`). */
 const POLYGON_CHAIN_ID = 137;
 
+/** Thin wrapper around Gamma + CLOB base URLs from config. */
 export class PolymarketApi {
   private gammaUrl: string;
   private clobUrl: string;
@@ -21,10 +28,12 @@ export class PolymarketApi {
     });
   }
 
+  /** Base URL for CLOB REST (books, markets). */
   getClobUrl(): string {
     return this.clobUrl;
   }
 
+  /** Exposed for {@link Trader} when building a live CLOB client. */
   getPrivateKey(): string | null {
     return this.config.private_key;
   }

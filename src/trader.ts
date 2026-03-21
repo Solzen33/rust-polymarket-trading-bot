@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Executes limit buys at period start: simulation records fake orders + summary;
+ * live mode uses {@link createClobClient} + {@link placeLimitOrder}.
+ */
+
 import { createClobClient, placeLimitOrder } from "./clob.js";
 import type { PolymarketApi } from "./api.js";
 import type { Config } from "./config.js";

@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Persists simulation run summaries to NDJSON files under `history/YYYY-MM-DD.json`.
+ */
+
 import { appendFile, mkdir } from "fs/promises";
 import { join } from "path";
 import type { SimulationSummary } from "./trader.js";

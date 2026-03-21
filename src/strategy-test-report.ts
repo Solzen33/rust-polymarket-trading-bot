@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Offline report: reads NDJSON `history/*.json` from simulation runs, resolves market
+ * winners via Gamma, and prints per-asset PnL-style stats. Run: `npm run report:test`.
+ */
+
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import axios from "axios";

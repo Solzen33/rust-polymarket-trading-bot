@@ -1,4 +1,7 @@
-// Gamma API / CLOB types aligned with Rust models
+/**
+ * @fileoverview Shared DTOs: Gamma/CLOB market shapes, order book, snapshot, and token labels
+ * for BTC/ETH/SOL/XRP Up/Down 15-minute markets.
+ */
 
 export interface Market {
   conditionId: string;

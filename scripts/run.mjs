@@ -1,3 +1,9 @@
+/**
+ * Interactive / CLI launcher for the bot: ensures `config.json` exists, defaults to simulation,
+ * prompts for live confirmation unless `--yes-live`, then spawns `tsx src/main-dual-limit-045.ts`.
+ * Windows: runs via PowerShell so `npx` resolves.
+ */
+
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";

@@ -1,3 +1,8 @@
+/**
+ * @fileoverview 15-minute market snapshots: resolves Up/Down token ids, reads CLOB books,
+ * and builds {@link MarketSnapshot} + {@link formatPrices} log lines for the main loop.
+ */
+
 import { PolymarketApi } from "./api.js";
 import type { Market, MarketSnapshot, MarketData, TokenPrice } from "./types.js";
 
@@ -7,6 +12,7 @@ function parseNum(s: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Map Gamma token rows to Up/Down {@link TokenPrice} when `price` is present on token objects. */
 function marketToData(market: Market): MarketData {
   let up_token: TokenPrice | null = null;
   let down_token: TokenPrice | null = null;

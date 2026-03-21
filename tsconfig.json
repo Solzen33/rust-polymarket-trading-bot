@@ -1,4 +1,5 @@
 {
+  // ESM + NodeNext resolution; output to dist/ for `npm run build` / `npm start`.
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",

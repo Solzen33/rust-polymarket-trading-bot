@@ -1,3 +1,10 @@
+/**
+ * @fileoverview Loads and normalizes `config.json`.
+ * - Merges partial files with {@link DEFAULT_CONFIG}.
+ * - Trims credential strings; empty strings become `null` so optional fields behave consistently.
+ * - {@link parseArgs} reads `--simulation` / `--no-simulation` and `-c` / `--config`.
+ */
+
 import { readFileSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -6,7 +13,7 @@ export interface PolymarketConfig {
   clob_api_url: string;
   /**
    * Optional Polymarket CLOB API credentials. If omitted, `createClobClient` derives or creates
-   * an API key using the wallet from `private_key` (live trading only).
+   * an API key using the wallet from `private_key`.
    */
   api_key: string | null;
   api_secret: string | null;
@@ -17,12 +24,15 @@ export interface PolymarketConfig {
   signature_type: number | null;
 }
 
+/** Strategy and market toggles for the dual-limit bot (see README for which fields the main loop uses). */
 export interface TradingConfig {
   eth_condition_id: string | null;
   btc_condition_id: string | null;
   solana_condition_id: string | null;
   xrp_condition_id: string | null;
+  /** Main loop sleep between snapshots (ms). */
   check_interval_ms: number;
+  /** Used to size orders when `dual_limit_shares` is not set: shares ≈ fixed_trade_amount / bid_price. */
   fixed_trade_amount: number;
   trigger_price: number;
   min_elapsed_minutes: number;
@@ -35,7 +45,9 @@ export interface TradingConfig {
   enable_eth_trading: boolean;
   enable_solana_trading: boolean;
   enable_xrp_trading: boolean;
+  /** Limit price for period-start buys (e.g. 0.45). */
   dual_limit_price: number | null;
+  /** If set, fixed share count per limit order; else derived from `fixed_trade_amount`. */
   dual_limit_shares: number | null;
 }
 
@@ -112,6 +124,7 @@ export function loadConfig(configPath: string = "config.json"): Config {
   return { polymarket, trading };
 }
 
+/** CLI: `--simulation` (default), `--no-simulation` for live; `-c` / `--config` for config path. */
 export function parseArgs(): { simulation: boolean; config: string } {
   const args = process.argv.slice(2);
   let simulation = true;
