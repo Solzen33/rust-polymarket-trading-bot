@@ -1,6 +1,6 @@
 # Polymarket 15m UP/DOWN trading bot (TypeScript)
 
-TypeScript bot for Polymarket **15-minute crypto Up/Down** markets. It polls CLOB books, runs a **threshold strategy** per asset (buy on upward price cross, multiple concurrent positions, per-position take-profit / stop-loss), logs live quotes, prints **period-end PnL**, and persists **trade history** to JSONL for reporting.
+TypeScript bot for Polymarket **15-minute crypto Up/Down** markets. It polls CLOB books, runs a **threshold strategy** per asset (buy on upward price cross, **at most one open position per side** UP/DOWN until closed, per-position take-profit / stop-loss), logs live quotes, prints **period-end PnL**, and persists **trade history** to JSONL for reporting.
 
 **Prices** are Polymarket-style decimals in **\[0, 1\]** (e.g. `0.45` ≈ 45¢ per share). Live orders use **GTC limits**; fills are not guaranteed instant.
 
@@ -11,13 +11,13 @@ TypeScript bot for Polymarket **15-minute crypto Up/Down** markets. It polls CLO
 | Area | Behavior |
 |------|-----------|
 | **Assets** | BTC, ETH, SOL, XRP — each enabled asset gets its own `ThresholdStrategy` + `PositionManager`; one shared CLOB client for orders. |
-| **Buy** | When UP or DOWN **mid** crosses **up** through `buyPrice` (default `0.45`). Multiple opens allowed; each position tracked separately. |
+| **Buy** | When UP or DOWN **mid** crosses **up** through `buyPrice` (default `0.45`). **No new buy on that side** while a position is still open there (standard and late share the same gate). |
 | **Sell** | Per position: **take profit** at `takeProfitPrice` (default `0.65`), **stop loss** at `stopLossPrice` (default `0.15`). |
 | **Time gate** | No **new standard** buys when `time_remaining_seconds ≤ minRemainingSeconds` (default **300** = 5 min). Existing positions still managed. |
 | **Late phase (last 5 min)** | While `time_remaining ≤ latePhaseWindowSeconds` (default **300**): **buy** on upward cross of `latePhaseBuyPrice` (default **0.85**) if that side has **no** open position; **take profit** when mid ≥ `latePhaseSellPrice` (default **0.95**); **stop loss** when mid ≤ `latePhaseStopLossPrice` (default **0.55**). Same **one position per side** rule. Disable with `latePhaseEnabled: false`. |
 | **Period rollover** | On new 15m period, open positions are rolled off (sell attempt + tracker close); **MARKET END PnL** banner per asset. |
 | **Logging** | **QUOTE [ASSET]** each poll: bid / ask / mid for UP and DOWN. |
-| **History** | Each close → append `trade_close` line to `history/YYYY-MM-DD.jsonl` (UTC). Bot start → `session` line. |
+| **History** | Each close → `trade_close` (includes `pnl`). Each ended 15m period → `period_pnl` (totals, `bySide`, `byReason`, `lines`). Bot start → `session`. |
 | **Report** | `npm run report` aggregates `history/*.jsonl` into a strategy summary + daily PnL (UTC). |
 
 ---
@@ -110,8 +110,8 @@ History rows include `entryKind`: `standard` vs `late_phase`. Close reasons incl
 ### Files
 
 - Directory: **`history/`** (in `.gitignore`).
-- One file per UTC calendar day of **close**: `YYYY-MM-DD.jsonl`.
-- Each line is a JSON object; main kinds: **`trade_close`**, **`session`**.
+- One file per UTC calendar day: `YYYY-MM-DD.jsonl` (**`trade_close`** rows use the close date; **`session`** / **`period_pnl`** use the write date).
+- Each line is a JSON object; main kinds: **`trade_close`** (per position `pnl` + **`sessionTotalPnlAsset`** / **`sessionTotalPnlAll`** cumulative since process start), **`period_pnl`** (`totalPnl` for the 15m window + same session totals), **`session`**.
 
 ### Strategy report
 
@@ -128,6 +128,27 @@ npx tsx src/strategy-test-report.ts --history-dir ./history --scale 100
 
 **win_rate** and **directional_accuracy** in the report both use **% of trades with positive PnL** (true settlement direction is not stored).
 
+### Example: strategy test output
+
+Illustrative `npm run report` summary (simulation run, **`--scale 100`** — cost/PnL in the table are multiplied for display; values in `history/*.jsonl` remain raw):
+
+```text
+mode:                 15m
+markets:              20
+trades:               111
+up_trades:            66
+down_trades:          45
+directional_accuracy: 77.48%
+win_rate:             77.48%
+avg_cost_per_trade:   259.0766
+total_cost:           28757.5000
+avg_pnl_per_trade:    +28.9865
+total_pnl:            +3217.5000
+
+Daily PnL (UTC):
+  2026-03-22  pnl=+3217.5000  trades=111  win_rate=77.48%
+```
+
 ---
 
 ## Project layout
@@ -141,7 +162,7 @@ src/
   logger.ts
   period.ts               # 15m period timestamp helper
   trading-assets.ts       # Asset keys, slug prefixes, trading toggles defaults
-  trading-history.ts      # TradeHistoryWriter → history/*.jsonl
+  trading-history.ts      # TradeHistoryWriter → history/*.jsonl (trade_close, period_pnl, session)
   strategy-test-report.ts # npm run report
   types.ts                # Shared DTOs
   strategy/threshold/
@@ -257,8 +278,9 @@ Exact order matters when debugging “why did it buy/sell here?”:
 |------|-----------|--------|
 | 1 | Compute `upMid` / `downMid` from `TokenPrice` | `midFromTokenPrice` needs both bid and ask. |
 | 2 | **Period change** → `onMarketStart` | Closes **all open** positions for this manager (rollover), resets `lastPeriod`, standard + **late** cross baselines. |
-| 3 | `checkExitsForOpenPositions` | **`late_phase`**: TP when mid ≥ `latePhaseSellPrice`; SL when mid ≤ `latePhaseStopLossPrice`. **`standard`**: TP/SL vs config. |
-| 4 | If `timeRemainingSeconds > minRemainingSeconds` | Standard `tryBuyOnCross` (0.45 leg) for UP/DOWN; else log skipped standard buy if cross would have fired. |
+| 3 | `checkExitsForOpenPositions` | **`late_phase`**: TP when mid ≥ `latePhaseSellPrice`; SL when mid ≤ `latePhaseStopLossPrice`. **`standard`**: TP/SL vs config. Returns which sides closed. |
+| 3b | Baseline reset on sell | For each side that **closed** this tick, set `lastUpMid` / `lastDownMid` (and late baselines if in late window) to **current** mid so we **don’t re-buy on the same poll** after TP/SL. |
+| 4 | If `timeRemainingSeconds > minRemainingSeconds` | Standard `tryBuyOnCross`: **skip if that side already has an open position**; else buy only on **upward cross** through `buyPrice`. |
 | 5 | If `latePhaseEnabled` and `timeRemaining ≤ latePhaseWindowSeconds` | `tryLateBuyOnCross` (0.85 leg) using `lateLastUpMid` / `lateLastDownMid`. |
 | 6 | Update `lastUpMid` / `lastDownMid` | End of tick — standard cross memory. |
 | 7 | Update or clear `lateLastUpMid` / `lateLastDownMid` | Set mids when inside late window; **null** outside so the next entry seeds cleanly. |
@@ -273,7 +295,7 @@ Exact order matters when debugging “why did it buy/sell here?”:
 | `api.ts` | Gamma slug → market; CLOB REST books / market by condition | `axios`, `types` |
 | `clob.ts` | `createClobClient`, `placeLimitOrder` (GTC, tick size) | `@polymarket/clob-client`, `ethers` |
 | `period.ts` | `PERIOD_SEC`, `currentPeriodTimestamp()` | — |
-| `trading-history.ts` | `TradeHistoryWriter`, JSONL rows | `Position` shape |
+| `trading-history.ts` | `TradeHistoryWriter`: `trade_close`, `period_pnl`, `session` | `Position`, `PeriodPnlSummary` |
 | `strategy-test-report.ts` | Read `*.jsonl`, aggregate stats | `trading-history` kinds |
 | `threshold-strategy.ts` | Core rules: cross, TP/SL, time gate | `pricing`, `position-manager`, executor |
 | `position-manager.ts` | Map of positions; `setOnClosed` hook | `types` |

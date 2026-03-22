@@ -127,6 +127,7 @@ export function buildPeriodPnlSummary(
   return {
     periodTimestamp,
     slug,
+    assetLabel,
     periodStartIso: new Date(periodTimestamp * 1000).toISOString(),
     lines,
     totalPnl,

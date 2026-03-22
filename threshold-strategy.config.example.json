@@ -1,7 +1,7 @@
 {
   "buyPrice": 0.45,
   "takeProfitPrice": 0.65,
-  "stopLossPrice": 0.15,
+  "stopLossPrice": 0.25,
   "minRemainingSeconds": 300,
   "sharesPerOrder": 5,
   "checkIntervalMs": 1000,
@@ -9,6 +9,6 @@
   "latePhaseWindowSeconds": 300,
   "latePhaseBuyPrice": 0.85,
   "latePhaseSellPrice": 0.95,
-  "latePhaseStopLossPrice": 0.55,
+  "latePhaseStopLossPrice": 0.70,
   "latePhaseSharesPerOrder": null
 }

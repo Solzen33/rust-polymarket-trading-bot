@@ -28,7 +28,8 @@ export interface TickContext {
  * Automated buy/sell on UP and DOWN mids: buy on upward cross of `buyPrice`,
  * take profit / stop loss per open position independently.
  * Late phase (default last 5 min): buy on cross of `latePhaseBuyPrice`; sell at `latePhaseSellPrice` or stop at `latePhaseStopLossPrice`.
- * At most **one open position per side** (UP/DOWN) — no re-buy until that side is flat.
+ * At most **one position per side** (UP/DOWN) at a time — no new buy until that side is
+ * closed in the tracker (after a successful exit sell, or period rollover / settlement handling).
  */
 export class ThresholdStrategy {
   private lastUpMid: number | null = null;
@@ -96,12 +97,25 @@ export class ThresholdStrategy {
       });
     }
 
-    await this.checkExitsForOpenPositions(upMid, downMid);
-
-    const allowNewBuys = ctx.timeRemainingSeconds > this.config.minRemainingSeconds;
     const inLatePhase =
       this.config.latePhaseEnabled &&
       ctx.timeRemainingSeconds <= this.config.latePhaseWindowSeconds;
+
+    const closedSides = await this.checkExitsForOpenPositions(upMid, downMid);
+    /** After a sell, align cross baselines to current mid so we don't re-buy the same tick. */
+    for (const side of closedSides) {
+      const mid = side === "UP" ? upMid : downMid;
+      if (mid == null) continue;
+      if (side === "UP") {
+        this.lastUpMid = mid;
+        if (inLatePhase) this.lateLastUpMid = mid;
+      } else {
+        this.lastDownMid = mid;
+        if (inLatePhase) this.lateLastDownMid = mid;
+      }
+    }
+
+    const allowNewBuys = ctx.timeRemainingSeconds > this.config.minRemainingSeconds;
 
     if (!allowNewBuys) {
       if (crossedAbove(this.lastUpMid, upMid, this.config.buyPrice)) {
@@ -177,7 +191,8 @@ export class ThresholdStrategy {
   private async checkExitsForOpenPositions(
     upMid: number | null,
     downMid: number | null
-  ): Promise<void> {
+  ): Promise<Set<TokenSide>> {
+    const closedSides = new Set<TokenSide>();
     const open = this.positions.getOpen();
     for (const p of open) {
       const mid = p.tokenSide === "UP" ? upMid : downMid;
@@ -200,6 +215,7 @@ export class ThresholdStrategy {
           try {
             const r = await this.executor.sell(p.tokenId, p.tokenSide, exitPrice, p.shares);
             this.positions.close(p.id, "late_stop_loss", exitPrice, r.orderId);
+            closedSides.add(p.tokenSide);
             this.log.info(
               `late phase stop loss | id=${p.id} side=${p.tokenSide} mid=${mid.toFixed(4)} limit=${exitPrice} shares=${p.shares} order=${r.orderId}`
             );
@@ -239,6 +255,7 @@ export class ThresholdStrategy {
         this.log.error(`sell failed for position ${p.id}: ${String(e)}`);
       }
     }
+    return closedSides;
   }
 
   private async tryBuyOnCross(
@@ -288,7 +305,9 @@ export class ThresholdStrategy {
   ): Promise<void> {
     if (this.positions.getOpenForSide(side).length > 0) {
       if (crossedAbove(side === "UP" ? this.lateLastUpMid : this.lateLastDownMid, currentMid, this.config.latePhaseBuyPrice)) {
-        this.log.info(`skipped late buy ${side} | already have an open ${side} position (one per side until sold)`);
+        this.log.info(
+          `skipped late buy ${side} | already hold an open ${side} position (buy again only after that position is sold)`
+        );
       }
       return;
     }

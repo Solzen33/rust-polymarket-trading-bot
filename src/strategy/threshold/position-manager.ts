@@ -16,7 +16,7 @@ export interface OpenPositionInput {
 }
 
 /**
- * In-memory store for independent positions (multiple concurrent opens allowed).
+ * In-memory store for positions. {@link ThresholdStrategy} enforces at most one open per UP/DOWN side.
  */
 export type PositionClosedListener = (closed: Position) => void;
 

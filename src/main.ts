@@ -272,6 +272,17 @@ async function main(): Promise<void> {
           for (const line of formatPeriodPnlBanner(summary)) {
             logger.info(line);
           }
+          const conditionId =
+            r.positions
+              .getAll()
+              .find(
+                (p) => p.periodTimestamp === lastSuccessfulPeriod && p.status === "closed"
+              )?.conditionId ?? "";
+          historyWriter.appendPeriodPnl(summary, {
+            simulation,
+            assetKey: r.key,
+            conditionId,
+          });
           r.positions.pruneClosed(2000);
         }
       }
